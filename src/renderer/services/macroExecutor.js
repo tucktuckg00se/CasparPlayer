@@ -48,6 +48,12 @@ async function executeCommand(command, casparCG, context) {
   // Replace context variables in params
   const resolvedParams = resolveParams(params, context);
 
+  // Handle client-side commands
+  if (type.startsWith('CLIENT_')) {
+    return await executeClientCommand(type, channel, layer, resolvedParams, context);
+  }
+
+  // Handle CasparCG commands
   switch (type) {
     case 'PLAY':
       return await casparCommands.play(
@@ -118,6 +124,55 @@ async function executeCommand(command, casparCG, context) {
   }
 }
 
+// Execute client-side commands using app context
+async function executeClientCommand(type, channel, layer, params, context) {
+  const { appContext } = context;
+
+  if (!appContext) {
+    throw new Error('Client commands require app context');
+  }
+
+  switch (type) {
+    case 'CLIENT_TOGGLE_PLAYLIST_MODE':
+      appContext.togglePlaylistMode(channel, layer);
+      return { success: true };
+
+    case 'CLIENT_TOGGLE_LOOP_MODE':
+      appContext.toggleLoopMode(channel, layer);
+      return { success: true };
+
+    case 'CLIENT_TOGGLE_LOOP_ITEM':
+      appContext.toggleLoopItem(channel, layer);
+      return { success: true };
+
+    case 'CLIENT_ADD_CHANNEL':
+      appContext.addChannel();
+      return { success: true };
+
+    case 'CLIENT_ADD_LAYER':
+      appContext.addLayer(channel);
+      return { success: true };
+
+    case 'CLIENT_NEXT_ITEM':
+      await appContext.nextItem(channel, layer);
+      return { success: true };
+
+    case 'CLIENT_PREV_ITEM':
+      await appContext.prevItem(channel, layer);
+      return { success: true };
+
+    case 'CLIENT_LOAD_RUNDOWN':
+      if (params.rundownName && appContext.loadRundown) {
+        await appContext.loadRundown(params.rundownName);
+        return { success: true };
+      }
+      throw new Error('Load rundown requires rundownName parameter');
+
+    default:
+      throw new Error(`Unknown client command: ${type}`);
+  }
+}
+
 function resolveParams(params, context) {
   const resolved = {};
 
@@ -165,17 +220,27 @@ export function createCommandTemplate(type = 'PLAY') {
 }
 
 export const COMMAND_TYPES = [
-  { value: 'PLAY', label: 'Play', description: 'Play media on a layer' },
-  { value: 'LOADBG', label: 'Load BG', description: 'Load media in background' },
-  { value: 'PAUSE', label: 'Pause', description: 'Pause playback' },
-  { value: 'RESUME', label: 'Resume', description: 'Resume playback' },
-  { value: 'STOP', label: 'Stop', description: 'Stop playback' },
-  { value: 'CLEAR', label: 'Clear', description: 'Clear layer' },
-  { value: 'CG_ADD', label: 'CG Add', description: 'Add template to layer' },
-  { value: 'CG_PLAY', label: 'CG Play', description: 'Play template' },
-  { value: 'CG_STOP', label: 'CG Stop', description: 'Stop template' },
-  { value: 'CG_UPDATE', label: 'CG Update', description: 'Update template data' },
-  { value: 'CUSTOM', label: 'Custom', description: 'Custom AMCP command' }
+  // CasparCG commands
+  { value: 'PLAY', label: 'Play', description: 'Play media on a layer', category: 'caspar' },
+  { value: 'LOADBG', label: 'Load BG', description: 'Load media in background', category: 'caspar' },
+  { value: 'PAUSE', label: 'Pause', description: 'Pause playback', category: 'caspar' },
+  { value: 'RESUME', label: 'Resume', description: 'Resume playback', category: 'caspar' },
+  { value: 'STOP', label: 'Stop', description: 'Stop playback', category: 'caspar' },
+  { value: 'CLEAR', label: 'Clear', description: 'Clear layer', category: 'caspar' },
+  { value: 'CG_ADD', label: 'CG Add', description: 'Add template to layer', category: 'caspar' },
+  { value: 'CG_PLAY', label: 'CG Play', description: 'Play template', category: 'caspar' },
+  { value: 'CG_STOP', label: 'CG Stop', description: 'Stop template', category: 'caspar' },
+  { value: 'CG_UPDATE', label: 'CG Update', description: 'Update template data', category: 'caspar' },
+  { value: 'CUSTOM', label: 'Custom', description: 'Custom AMCP command', category: 'caspar' },
+  // Client-side commands
+  { value: 'CLIENT_TOGGLE_PLAYLIST_MODE', label: 'Toggle Playlist Mode', description: 'Toggle auto-advance mode', category: 'client' },
+  { value: 'CLIENT_TOGGLE_LOOP_MODE', label: 'Toggle Loop Mode', description: 'Toggle playlist looping', category: 'client' },
+  { value: 'CLIENT_TOGGLE_LOOP_ITEM', label: 'Toggle Loop Item', description: 'Toggle item loop', category: 'client' },
+  { value: 'CLIENT_ADD_CHANNEL', label: 'Add Channel', description: 'Add new channel', category: 'client' },
+  { value: 'CLIENT_ADD_LAYER', label: 'Add Layer', description: 'Add layer to channel', category: 'client' },
+  { value: 'CLIENT_NEXT_ITEM', label: 'Next Item', description: 'Go to next playlist item', category: 'client' },
+  { value: 'CLIENT_PREV_ITEM', label: 'Previous Item', description: 'Go to previous playlist item', category: 'client' },
+  { value: 'CLIENT_LOAD_RUNDOWN', label: 'Load Rundown', description: 'Load saved rundown', category: 'client' }
 ];
 
 export default {

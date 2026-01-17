@@ -10,8 +10,8 @@
 }
 
 .layer.expanded {
-  width: 100%;
-  min-width: 400px;
+  width: 380px;
+  flex-shrink: 0;
 }
 
 .layer-header {

@@ -1,5 +1,65 @@
 .connection-dialog {
-  width: 500px;
+  width: 400px;
+}
+
+.connection-info {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.connection-detail {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.connection-detail:not(:last-child) {
+  border-bottom: 1px solid var(--border-color);
+}
+
+.detail-label {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.detail-value {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Courier New', monospace;
+}
+
+.settings-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-primary);
+  font-size: 13px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.settings-link:hover {
+  text-decoration: underline;
+}
+
+.btn-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent-primary);
+}
+
+.btn-link:hover {
+  background: transparent;
+  text-decoration: underline;
 }
 
 .error-message {

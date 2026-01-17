@@ -67,6 +67,8 @@ export default function Layer({ layer, channelId, expanded = false }) {
         channelId={channelId}
         layerId={layer.id}
         expanded={expanded}
+        selectedItems={layer.selectedItems || []}
+        lastSelectedIndex={layer.lastSelectedIndex}
       />
     </div>
   );

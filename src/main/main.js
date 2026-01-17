@@ -13,10 +13,11 @@ const userDataPath = app.getPath('userData');
 const configPath = path.join(userDataPath, 'config.json');
 const workspacesPath = path.join(userDataPath, 'workspaces');
 const macrosPath = path.join(userDataPath, 'macros');
+const rundownsPath = path.join(userDataPath, 'rundowns');
 const cachePath = path.join(userDataPath, 'cache', 'thumbnails');
 
 // Ensure directories exist
-[workspacesPath, macrosPath, cachePath].forEach(dir => {
+[workspacesPath, macrosPath, rundownsPath, cachePath].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -320,4 +321,79 @@ ipcMain.handle('osc:stop', async () => {
 
 ipcMain.handle('osc:status', async () => {
   return { running: oscService.isRunning() };
+});
+
+// Rundown management
+ipcMain.handle('rundown:save', async (event, name, data) => {
+  try {
+    const safeName = name.replace(/[^a-z0-9_-]/gi, '_');
+    const filePath = path.join(rundownsPath, `${safeName}.json`);
+    const rundownData = {
+      ...data,
+      name,
+      savedAt: new Date().toISOString()
+    };
+    fs.writeFileSync(filePath, JSON.stringify(rundownData, null, 2));
+    return { success: true, name: safeName };
+  } catch (error) {
+    console.error('Error saving rundown:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('rundown:load', async (event, name) => {
+  try {
+    const safeName = name.replace(/[^a-z0-9_-]/gi, '_');
+    const filePath = path.join(rundownsPath, `${safeName}.json`);
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      return { success: true, data: JSON.parse(data) };
+    }
+    return { success: false, error: 'Rundown not found' };
+  } catch (error) {
+    console.error('Error loading rundown:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('rundown:list', async () => {
+  try {
+    const files = fs.readdirSync(rundownsPath);
+    const rundowns = [];
+    for (const file of files) {
+      if (file.endsWith('.json')) {
+        try {
+          const data = fs.readFileSync(path.join(rundownsPath, file), 'utf8');
+          const rundown = JSON.parse(data);
+          rundowns.push({
+            id: file.replace('.json', ''),
+            name: rundown.name || file.replace('.json', ''),
+            savedAt: rundown.savedAt || null,
+            channelCount: rundown.channels?.length || 0
+          });
+        } catch (e) {
+          // Skip invalid files
+        }
+      }
+    }
+    return rundowns.sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''));
+  } catch (error) {
+    console.error('Error listing rundowns:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('rundown:delete', async (event, name) => {
+  try {
+    const safeName = name.replace(/[^a-z0-9_-]/gi, '_');
+    const filePath = path.join(rundownsPath, `${safeName}.json`);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return { success: true };
+    }
+    return { success: false, error: 'Rundown not found' };
+  } catch (error) {
+    console.error('Error deleting rundown:', error);
+    return { success: false, error: error.message };
+  }
 });

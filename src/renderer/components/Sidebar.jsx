@@ -2,6 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import FileBrowser from './FileBrowser';
 import MacroList from './MacroList';
+import RundownList from './RundownList';
 import './Sidebar.css';
 
 export default function Sidebar() {
@@ -19,9 +20,9 @@ export default function Sidebar() {
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             <polyline points="13 2 13 9 20 9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          Media Files
+          Files
         </button>
-        
+
         <button
           className={`sidebar-tab ${sidebarTab === 'macros' ? 'active' : ''}`}
           onClick={() => setSidebarTab('macros')}
@@ -32,10 +33,23 @@ export default function Sidebar() {
           </svg>
           Macros
         </button>
+
+        <button
+          className={`sidebar-tab ${sidebarTab === 'rundowns' ? 'active' : ''}`}
+          onClick={() => setSidebarTab('rundowns')}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Rundowns
+        </button>
       </div>
 
       <div className="sidebar-content">
-        {sidebarTab === 'files' ? <FileBrowser /> : <MacroList />}
+        {sidebarTab === 'files' && <FileBrowser />}
+        {sidebarTab === 'macros' && <MacroList />}
+        {sidebarTab === 'rundowns' && <RundownList />}
       </div>
     </div>
   );

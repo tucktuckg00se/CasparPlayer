@@ -5,9 +5,22 @@ import MediaPreview from './MediaPreview';
 import './FileBrowser.css';
 
 export default function FileBrowser() {
-  const { state, setMediaRoot, selectMediaFile, toggleFolderExpand } = useApp();
+  const { state, settings, setMediaRoot, selectMediaFile, toggleFolderExpand } = useApp();
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+
+  // Auto-load saved media folder on startup
+  useEffect(() => {
+    if (!initialLoadDone && settings.mediaFolderPath && !state.media.rootPath) {
+      setInitialLoadDone(true);
+      scanFolder(settings.mediaFolderPath).then(() => {
+        // Start watching for changes
+        const { ipcRenderer } = window.require('electron');
+        ipcRenderer.invoke('media:watchFolder', settings.mediaFolderPath);
+      });
+    }
+  }, [settings.mediaFolderPath, state.media.rootPath, initialLoadDone]);
 
   useEffect(() => {
     // Listen for media folder changes

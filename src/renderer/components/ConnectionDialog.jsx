@@ -3,11 +3,7 @@ import { useApp } from '../context/AppContext';
 import './ConnectionDialog.css';
 
 export default function ConnectionDialog({ onClose }) {
-  const { connection, connectToCaspar } = useApp();
-  const [host, setHost] = useState(connection.host || '127.0.0.1');
-  const [port, setPort] = useState(connection.port || 5250);
-  const [oscPort, setOscPort] = useState(connection.oscPort || 6250);
-  const [previewUrl, setPreviewUrl] = useState(connection.previewUrl || '');
+  const { connection, settings, connectToCaspar, setShowSettings } = useApp();
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -16,7 +12,12 @@ export default function ConnectionDialog({ onClose }) {
     setError(null);
     setConnecting(true);
 
-    const success = await connectToCaspar(host, port, oscPort, previewUrl);
+    const success = await connectToCaspar(
+      settings.host,
+      settings.port,
+      settings.oscPort,
+      connection.previewUrl
+    );
 
     setConnecting(false);
 
@@ -25,6 +26,11 @@ export default function ConnectionDialog({ onClose }) {
     } else {
       setError('Failed to connect to CasparCG server. Please check your settings.');
     }
+  };
+
+  const handleOpenSettings = () => {
+    onClose();
+    setShowSettings(true);
   };
 
   const handleCancel = () => {
@@ -44,57 +50,32 @@ export default function ConnectionDialog({ onClose }) {
 
         <form onSubmit={handleConnect}>
           <div className="modal-body">
-            <div className="input-group">
-              <label htmlFor="host">Host / IP Address</label>
-              <input
-                id="host"
-                type="text"
-                className="input"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="127.0.0.1"
-                required
-              />
+            <div className="connection-info">
+              <div className="connection-detail">
+                <span className="detail-label">Host:</span>
+                <span className="detail-value">{settings.host}</span>
+              </div>
+              <div className="connection-detail">
+                <span className="detail-label">AMCP Port:</span>
+                <span className="detail-value">{settings.port}</span>
+              </div>
+              <div className="connection-detail">
+                <span className="detail-label">OSC Port:</span>
+                <span className="detail-value">{settings.oscPort}</span>
+              </div>
             </div>
 
-            <div className="input-group">
-              <label htmlFor="port">AMCP Port</label>
-              <input
-                id="port"
-                type="number"
-                className="input"
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-                placeholder="5250"
-                required
-              />
-            </div>
-
-            <div className="input-group">
-              <label htmlFor="oscPort">OSC Port</label>
-              <input
-                id="oscPort"
-                type="number"
-                className="input"
-                value={oscPort}
-                onChange={(e) => setOscPort(e.target.value)}
-                placeholder="6250"
-                required
-              />
-            </div>
-
-            <div className="input-group">
-              <label htmlFor="previewUrl">Preview Stream URL (optional)</label>
-              <input
-                id="previewUrl"
-                type="text"
-                className="input"
-                value={previewUrl}
-                onChange={(e) => setPreviewUrl(e.target.value)}
-                placeholder="http://host:port/stream?channel={channel}"
-              />
-              <span className="input-hint">Use {'{channel}'} as placeholder for channel number</span>
-            </div>
+            <button
+              type="button"
+              className="btn btn-link settings-link"
+              onClick={handleOpenSettings}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+              </svg>
+              Change connection settings
+            </button>
 
             {error && (
               <div className="error-message">

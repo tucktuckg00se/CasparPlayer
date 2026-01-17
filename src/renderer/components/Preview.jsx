@@ -3,9 +3,10 @@ import { useApp } from '../context/AppContext';
 import './Preview.css';
 
 export default function Preview({ channelId, expanded = false }) {
-  const { connection } = useApp();
+  const { connection, settings } = useApp();
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState(null);
   const [streamUrl, setStreamUrl] = useState('');
 
@@ -16,13 +17,56 @@ export default function Preview({ channelId, expanded = false }) {
       const url = connection.previewUrl.replace('{channel}', channelId);
       setStreamUrl(url);
     } else if (connection.isConnected) {
-      // Default preview URL (FFmpeg stream typically on port 9000+channel)
-      const previewPort = 9000 + channelId;
-      setStreamUrl(`http://${connection.host}:${previewPort}/stream`);
+      // Default preview URL using settings
+      const previewPort = settings.previewPort || 9250;
+      setStreamUrl(`http://${connection.host}:${previewPort + channelId - 1}`);
     } else {
       setStreamUrl('');
     }
-  }, [connection.isConnected, connection.host, connection.previewUrl, channelId]);
+  }, [connection.isConnected, connection.host, connection.previewUrl, channelId, settings.previewPort]);
+
+  // Start streaming from CasparCG using ADD STREAM command
+  const handleStartStream = async () => {
+    if (!connection.casparCG || !connection.isConnected) return;
+
+    try {
+      setError(null);
+      // Calculate CRF based on quality setting (lower CRF = higher quality)
+      const crf = Math.round(51 - (settings.previewQuality / 100) * 41);
+      const previewPort = settings.previewPort || 9250;
+      const networkCache = settings.networkCache || 500;
+
+      // Start streaming from CasparCG
+      // Note: This requires CasparCG server to be configured for streaming
+      const streamCommand = `ADD ${channelId} STREAM udp://127.0.0.1:${previewPort + channelId - 1} -format mpegts -codec:v libx264 -crf:v ${crf} -tune zerolatency -preset ultrafast -codec:a aac`;
+
+      await connection.casparCG.do(streamCommand);
+      setIsStreaming(true);
+
+      // Give the stream a moment to start before connecting
+      setTimeout(() => {
+        handlePlay();
+      }, 500);
+    } catch (err) {
+      console.error('Failed to start stream:', err);
+      setError('Failed to start CasparCG stream');
+    }
+  };
+
+  // Stop streaming from CasparCG
+  const handleStopStream = async () => {
+    try {
+      if (connection.casparCG && connection.isConnected && isStreaming) {
+        const previewPort = settings.previewPort || 9250;
+        const stopCommand = `REMOVE ${channelId} STREAM udp://127.0.0.1:${previewPort + channelId - 1}`;
+        await connection.casparCG.do(stopCommand).catch(() => {});
+      }
+      handleStop();
+      setIsStreaming(false);
+    } catch (err) {
+      console.error('Failed to stop stream:', err);
+    }
+  };
 
   const handlePlay = () => {
     if (videoRef.current && streamUrl) {
@@ -100,12 +144,21 @@ export default function Preview({ channelId, expanded = false }) {
                 <polyline points="17 2 12 7 7 2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
               <p>Channel {channelId} Preview</p>
-              <button className="btn btn-primary btn-sm" onClick={handlePlay}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z"/>
-                </svg>
-                Load Preview
-              </button>
+              <div className="preview-buttons">
+                <button className="btn btn-primary btn-sm" onClick={handlePlay}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                  Load URL
+                </button>
+                <button className="btn btn-sm" onClick={handleStartStream} title="Start stream from CasparCG">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                  Start Stream
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -113,12 +166,19 @@ export default function Preview({ channelId, expanded = false }) {
 
       {isPlaying && (
         <div className="preview-controls">
-          <button className="btn-icon btn-sm" onClick={handleStop} title="Stop Preview">
+          <button
+            className="btn-icon btn-sm"
+            onClick={isStreaming ? handleStopStream : handleStop}
+            title={isStreaming ? 'Stop Stream' : 'Stop Preview'}
+          >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <rect x="6" y="6" width="12" height="12"/>
             </svg>
           </button>
-          <span className="preview-label">Channel {channelId}</span>
+          <span className="preview-label">
+            Channel {channelId}
+            {isStreaming && <span className="streaming-badge">LIVE</span>}
+          </span>
         </div>
       )}
     </div>

@@ -41,6 +41,29 @@
   margin-top: 8px;
 }
 
+.preview-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.streaming-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--error-light);
+  color: white;
+  font-size: 9px;
+  font-weight: 600;
+  border-radius: 3px;
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .preview-controls {
   position: absolute;
   bottom: 8px;

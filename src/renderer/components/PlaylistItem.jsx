@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { DRAG_TYPES, setDragEventData } from './DragDropProvider';
 import { formatDuration } from '../utils/timecode';
@@ -9,14 +9,21 @@ export default function PlaylistItem({
   index,
   isPlaying,
   isCurrent,
+  isSelected,
   channelId,
-  layerId
+  layerId,
+  onItemClick
 }) {
-  const { selectPlaylistItem, removePlaylistItem, playItem } = useApp();
+  const { removePlaylistItem, playItem, updateItemDuration } = useApp();
   const isMacro = item.type === 'macro';
+  const isImage = item.type === 'image';
+  const [editingDuration, setEditingDuration] = useState(false);
+  const [durationValue, setDurationValue] = useState(item.duration.toString());
 
-  const handleClick = () => {
-    selectPlaylistItem(channelId, layerId, item.id);
+  const handleClick = (e) => {
+    if (onItemClick) {
+      onItemClick(e);
+    }
   };
 
   const handleDoubleClick = () => {
@@ -42,9 +49,38 @@ export default function PlaylistItem({
     e.currentTarget.classList.remove('dragging');
   };
 
+  const handleDurationClick = (e) => {
+    if (isImage) {
+      e.stopPropagation();
+      setDurationValue(item.duration.toString());
+      setEditingDuration(true);
+    }
+  };
+
+  const handleDurationChange = (e) => {
+    setDurationValue(e.target.value);
+  };
+
+  const handleDurationBlur = () => {
+    const newDuration = parseFloat(durationValue) || 0;
+    if (newDuration !== item.duration) {
+      updateItemDuration(channelId, layerId, item.id, newDuration);
+    }
+    setEditingDuration(false);
+  };
+
+  const handleDurationKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleDurationBlur();
+    } else if (e.key === 'Escape') {
+      setDurationValue(item.duration.toString());
+      setEditingDuration(false);
+    }
+  };
+
   return (
     <div
-      className={`playlist-item ${isCurrent ? 'current' : ''} ${isPlaying ? 'playing' : ''} ${isMacro ? 'macro' : ''}`}
+      className={`playlist-item ${isCurrent ? 'current' : ''} ${isPlaying ? 'playing' : ''} ${isMacro ? 'macro' : ''} ${isSelected ? 'selected' : ''}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       draggable
@@ -58,7 +94,9 @@ export default function PlaylistItem({
       </div>
 
       <div className="item-info">
-        <span className="item-name" title={item.name}>{item.name}</span>
+        <span className="item-name" title={item.relativePath || item.name}>
+          {item.relativePath || item.name}
+        </span>
         {item.resolution && (
           <span className="item-meta">{item.resolution}</span>
         )}
@@ -68,9 +106,28 @@ export default function PlaylistItem({
         {item.inPoint !== null || item.outPoint !== null ? (
           <span className="item-io" title="Has In/Out points">IO</span>
         ) : null}
-        {item.duration > 0 && (
-          <span>{formatDuration(item.duration)}</span>
-        )}
+        {isImage && editingDuration ? (
+          <input
+            type="number"
+            className="duration-input"
+            value={durationValue}
+            onChange={handleDurationChange}
+            onBlur={handleDurationBlur}
+            onKeyDown={handleDurationKeyDown}
+            autoFocus
+            min="0"
+            step="0.5"
+            onClick={e => e.stopPropagation()}
+          />
+        ) : item.duration > 0 ? (
+          <span
+            className={isImage ? 'duration-editable' : ''}
+            onClick={handleDurationClick}
+            title={isImage ? 'Click to edit duration' : ''}
+          >
+            {formatDuration(item.duration)}
+          </span>
+        ) : null}
       </div>
 
       <button

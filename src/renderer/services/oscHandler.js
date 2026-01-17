@@ -72,7 +72,8 @@ export function processOscMessage(message, updateCallback) {
         channel,
         layer,
         producerType,
-        isEmpty: producerType === '' || producerType === 'empty'
+        isEmpty: producerType === '' || producerType === 'empty',
+        isImage: producerType === 'image-producer' || producerType === 'image'
       });
       break;
 

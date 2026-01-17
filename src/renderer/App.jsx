@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './styles/App.css';
 import ConnectionDialog from './components/ConnectionDialog';
+import Settings from './components/Settings';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import ChannelsContainer from './components/ChannelsContainer';
@@ -8,11 +9,13 @@ import ExpandedChannel from './components/ExpandedChannel';
 import { AppProvider, useApp } from './context/AppContext';
 
 function AppContent() {
-  const { 
-    state, 
-    showConnectionDialog, 
+  const {
+    state,
+    showConnectionDialog,
     setShowConnectionDialog,
-    connection 
+    showSettings,
+    setShowSettings,
+    connection
   } = useApp();
 
   useEffect(() => {
@@ -38,12 +41,16 @@ function AppContent() {
       {showConnectionDialog && (
         <ConnectionDialog onClose={() => setShowConnectionDialog(false)} />
       )}
-      
+
+      {showSettings && (
+        <Settings onClose={() => setShowSettings(false)} />
+      )}
+
       <Header />
-      
+
       <div className="app-main">
         <Sidebar />
-        
+
         <div className="content-area">
           {state.ui.currentView === 'multi' ? (
             <ChannelsContainer />

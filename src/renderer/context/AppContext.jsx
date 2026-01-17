@@ -43,13 +43,29 @@ export function AppProvider({ children }) {
     serverInfo: null
   });
   const [showConnectionDialog, setShowConnectionDialog] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [oscConnected, setOscConnected] = useState(false);
+  const [settings, setSettings] = useState({
+    host: '127.0.0.1',
+    port: 5250,
+    oscPort: 6250,
+    defaultImageDuration: 5,
+    previewQuality: 50,
+    networkCache: 500,
+    previewPort: 9250,
+    mediaFolderPath: ''
+  });
+  const [rundowns, setRundowns] = useState([]);
   const oscListenerRef = useRef(null);
+  const heartbeatIntervalRef = useRef(null);
+  const imageTimersRef = useRef({}); // Track image auto-advance timers by channel-layer key
+  const lastTimeRef = useRef({}); // Track last time updates for completion detection
 
   // Load saved configuration
   useEffect(() => {
     loadConfig();
     loadMacros();
+    loadRundownList();
   }, []);
 
   // OSC message handling
@@ -68,8 +84,85 @@ export function AppProvider({ children }) {
     };
   }, []);
 
+  // Auto-advance to next item in playlist
+  const autoAdvanceNext = useCallback((channelId, layerId) => {
+    setState(prev => {
+      const channel = prev.channels.find(ch => ch.id === channelId);
+      if (!channel) return prev;
+
+      const layer = channel.layers.find(l => l.id === layerId);
+      if (!layer || !layer.playlistMode || layer.playlist.length === 0) return prev;
+
+      let nextIndex = layer.currentIndex + 1;
+
+      // Check if we're at the end
+      if (nextIndex >= layer.playlist.length) {
+        if (layer.loopMode) {
+          nextIndex = 0; // Loop back to start
+        } else {
+          // End of playlist, stop
+          return {
+            ...prev,
+            channels: prev.channels.map(ch => {
+              if (ch.id !== channelId) return ch;
+              return {
+                ...ch,
+                layers: ch.layers.map(l => {
+                  if (l.id !== layerId) return l;
+                  return {
+                    ...l,
+                    isPlaying: false,
+                    playlist: l.playlist.map(item => ({ ...item, playing: false }))
+                  };
+                })
+              };
+            })
+          };
+        }
+      }
+
+      // Schedule the next item to play
+      // We return updated state and trigger playback externally
+      return {
+        ...prev,
+        channels: prev.channels.map(ch => {
+          if (ch.id !== channelId) return ch;
+          return {
+            ...ch,
+            layers: ch.layers.map(l => {
+              if (l.id !== layerId) return l;
+              return {
+                ...l,
+                pendingAutoAdvance: nextIndex
+              };
+            })
+          };
+        })
+      };
+    });
+  }, []);
+
   const handleOscUpdate = useCallback((update) => {
     const { type, channel, layer } = update;
+    const layerKey = `${channel}-${layer}`;
+
+    // Track time updates for completion detection
+    if (type === 'time') {
+      const lastTime = lastTimeRef.current[layerKey];
+      const timeRemaining = update.totalTime - update.currentTime;
+
+      // Detect completion: total time > 0 and remaining time is very small
+      if (update.totalTime > 0 && timeRemaining <= 0.1 && timeRemaining >= 0) {
+        // Only trigger once per completion
+        if (!lastTime || lastTime.completed !== true) {
+          lastTimeRef.current[layerKey] = { ...update, completed: true };
+          // Trigger auto-advance
+          autoAdvanceNext(channel, layer);
+        }
+      } else {
+        lastTimeRef.current[layerKey] = { ...update, completed: false };
+      }
+    }
 
     setState(prev => ({
       ...prev,
@@ -102,6 +195,14 @@ export function AppProvider({ children }) {
                   isPlaying: !update.isPaused
                 };
 
+              case 'producer_type':
+                // Track if current item is an image for duration timeout
+                return {
+                  ...l,
+                  currentProducerType: update.producerType,
+                  isImage: update.isImage
+                };
+
               default:
                 return l;
             }
@@ -109,7 +210,7 @@ export function AppProvider({ children }) {
         };
       })
     }));
-  }, []);
+  }, [autoAdvanceNext]);
 
   // Auto-save state periodically
   useEffect(() => {
@@ -120,16 +221,145 @@ export function AppProvider({ children }) {
     return () => clearInterval(interval);
   }, [state]);
 
+  // Heartbeat to detect connection loss
+  useEffect(() => {
+    // Clear any existing heartbeat interval
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    // Only start heartbeat if connected
+    if (connection.isConnected && connection.casparCG) {
+      heartbeatIntervalRef.current = setInterval(async () => {
+        try {
+          await connection.casparCG.info();
+        } catch (error) {
+          console.error('Heartbeat failed, connection lost:', error);
+          // Connection lost - update state
+          setConnection(prev => ({
+            ...prev,
+            isConnected: false,
+            casparCG: null,
+            serverInfo: null
+          }));
+          // Clear heartbeat interval
+          if (heartbeatIntervalRef.current) {
+            clearInterval(heartbeatIntervalRef.current);
+            heartbeatIntervalRef.current = null;
+          }
+        }
+      }, 5000); // Check every 5 seconds
+    }
+
+    return () => {
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+    };
+  }, [connection.isConnected, connection.casparCG]);
+
+  // Process pending auto-advance
+  useEffect(() => {
+    if (!connection.casparCG || !connection.isConnected) return;
+
+    state.channels.forEach(channel => {
+      channel.layers.forEach(async layer => {
+        if (layer.pendingAutoAdvance !== undefined && layer.pendingAutoAdvance !== null) {
+          const nextIndex = layer.pendingAutoAdvance;
+          const nextItem = layer.playlist[nextIndex];
+
+          if (nextItem) {
+            try {
+              // Import casparCommands dynamically to avoid circular dependencies
+              await casparCommands.play(connection.casparCG, channel.id, layer.id, nextItem.path, {
+                loop: layer.loopItem,
+                inPoint: nextItem.inPoint,
+                outPoint: nextItem.outPoint
+              });
+
+              // Update state to reflect playing
+              setState(prev => ({
+                ...prev,
+                channels: prev.channels.map(ch => {
+                  if (ch.id !== channel.id) return ch;
+                  return {
+                    ...ch,
+                    layers: ch.layers.map(l => {
+                      if (l.id !== layer.id) return l;
+                      return {
+                        ...l,
+                        pendingAutoAdvance: null,
+                        isPlaying: true,
+                        currentIndex: nextIndex,
+                        playlist: l.playlist.map((pl, idx) => ({
+                          ...pl,
+                          playing: idx === nextIndex,
+                          selected: idx === nextIndex
+                        }))
+                      };
+                    })
+                  };
+                })
+              }));
+
+              // Load next item in background if playlist mode
+              if (layer.playlistMode && nextIndex < layer.playlist.length - 1) {
+                const bgItem = layer.playlist[nextIndex + 1];
+                await casparCommands.loadBg(connection.casparCG, channel.id, layer.id, bgItem.path, {
+                  auto: true,
+                  loop: layer.loopItem,
+                  inPoint: bgItem.inPoint,
+                  outPoint: bgItem.outPoint
+                });
+              }
+            } catch (error) {
+              console.error('Auto-advance playback failed:', error);
+              // Clear pending flag on error
+              setState(prev => ({
+                ...prev,
+                channels: prev.channels.map(ch => {
+                  if (ch.id !== channel.id) return ch;
+                  return {
+                    ...ch,
+                    layers: ch.layers.map(l => {
+                      if (l.id !== layer.id) return l;
+                      return { ...l, pendingAutoAdvance: null };
+                    })
+                  };
+                })
+              }));
+            }
+          }
+        }
+      });
+    });
+  }, [state.channels, connection.casparCG, connection.isConnected]);
+
   const loadConfig = async () => {
     const { ipcRenderer } = window.require('electron');
     const config = await ipcRenderer.invoke('config:load');
-    
+
     if (config) {
       if (config.connection) {
         setConnection(prev => ({ ...prev, ...config.connection }));
       }
       if (config.state) {
         setState(prev => ({ ...prev, ...config.state }));
+      }
+      if (config.settings) {
+        setSettings(prev => ({ ...prev, ...config.settings }));
+        // Also load media folder path into media state
+        if (config.settings.mediaFolderPath) {
+          setState(prev => ({
+            ...prev,
+            media: {
+              ...prev.media,
+              rootPath: config.settings.mediaFolderPath
+            }
+          }));
+        }
       }
     }
   };
@@ -146,9 +376,33 @@ export function AppProvider({ children }) {
       state: {
         channels: state.channels,
         ui: state.ui
-      }
+      },
+      settings
     });
   };
+
+  const updateSettings = useCallback(async (newSettings) => {
+    const { ipcRenderer } = window.require('electron');
+    const updatedSettings = { ...settings, ...newSettings };
+    setSettings(updatedSettings);
+
+    // Save settings immediately
+    await ipcRenderer.invoke('config:save', {
+      connection: {
+        host: connection.host,
+        port: connection.port,
+        oscPort: connection.oscPort,
+        previewUrl: connection.previewUrl
+      },
+      state: {
+        channels: state.channels,
+        ui: state.ui
+      },
+      settings: updatedSettings
+    });
+
+    return updatedSettings;
+  }, [settings, connection, state.channels, state.ui]);
 
   const loadMacros = async () => {
     const { ipcRenderer } = window.require('electron');
@@ -168,6 +422,17 @@ export function AppProvider({ children }) {
       });
 
       await ccg.connect();
+
+      // Listen for disconnect events
+      ccg.on('disconnect', () => {
+        console.log('CasparCG disconnected');
+        setConnection(prev => ({
+          ...prev,
+          isConnected: false,
+          casparCG: null,
+          serverInfo: null
+        }));
+      });
 
       // Get server info
       const info = await ccg.info();
@@ -271,17 +536,48 @@ export function AppProvider({ children }) {
     loopItem: false,
     currentTime: 0,
     totalTime: 0,
-    isPlaying: false
+    isPlaying: false,
+    selectedItems: [],      // Array of selected item IDs for multi-select
+    deletedItems: []        // Undo stack for deleted items
   });
+
+  // Compute relative path from media root
+  const computeRelativePath = useCallback((fullPath, mediaRoot) => {
+    if (!mediaRoot || !fullPath) return null;
+    // Normalize path separators
+    const normalizedFull = fullPath.replace(/\\/g, '/');
+    const normalizedRoot = mediaRoot.replace(/\\/g, '/');
+    if (normalizedFull.startsWith(normalizedRoot)) {
+      let relativePath = normalizedFull.substring(normalizedRoot.length);
+      // Remove leading slash
+      if (relativePath.startsWith('/')) {
+        relativePath = relativePath.substring(1);
+      }
+      // Remove file extension for CasparCG compatibility
+      const lastDot = relativePath.lastIndexOf('.');
+      if (lastDot > 0) {
+        relativePath = relativePath.substring(0, lastDot);
+      }
+      return relativePath;
+    }
+    return null;
+  }, []);
 
   // Playlist Management
   const addMediaToPlaylist = useCallback((channelId, layerId, mediaFile) => {
+    // Compute relative path from media root
+    const relativePath = computeRelativePath(mediaFile.path, state.media.rootPath);
+
+    // Determine media type from file extension or metadata
+    const fileType = mediaFile.type || getFileType(mediaFile.name);
+
     const playlistItem = {
       id: uuidv4(),
-      type: 'media',
+      type: fileType,
       name: mediaFile.name,
       path: mediaFile.path,
-      duration: mediaFile.metadata?.duration || 0,
+      relativePath: relativePath,
+      duration: mediaFile.metadata?.duration || (fileType === 'image' ? settings.defaultImageDuration : 0),
       resolution: mediaFile.metadata?.resolution || '',
       inPoint: null,
       outPoint: null,
@@ -309,7 +605,19 @@ export function AppProvider({ children }) {
         return ch;
       })
     }));
-  }, []);
+  }, [state.media.rootPath, settings.defaultImageDuration, computeRelativePath]);
+
+  // Helper to determine file type from filename
+  const getFileType = (filename) => {
+    const ext = filename.toLowerCase().split('.').pop();
+    const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tga', 'tiff'];
+    const audioExts = ['mp3', 'wav', 'ogg', 'aac', 'flac'];
+    if (videoExts.includes(ext)) return 'video';
+    if (imageExts.includes(ext)) return 'image';
+    if (audioExts.includes(ext)) return 'audio';
+    return 'media';
+  };
 
   // Delete layer
   const deleteLayer = useCallback((channelId, layerId) => {
@@ -410,6 +718,164 @@ export function AppProvider({ children }) {
         return ch;
       })
     }));
+  }, []);
+
+  // Update item duration (for images)
+  const updateItemDuration = useCallback((channelId, layerId, itemId, duration) => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch => {
+        if (ch.id === channelId) {
+          return {
+            ...ch,
+            layers: ch.layers.map(layer => {
+              if (layer.id === layerId) {
+                return {
+                  ...layer,
+                  playlist: layer.playlist.map(item => {
+                    if (item.id === itemId) {
+                      return { ...item, duration: parseFloat(duration) || 0 };
+                    }
+                    return item;
+                  })
+                };
+              }
+              return layer;
+            })
+          };
+        }
+        return ch;
+      })
+    }));
+  }, []);
+
+  // Select playlist items (for multi-select)
+  const selectPlaylistItems = useCallback((channelId, layerId, itemIds, mode = 'replace') => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch => {
+        if (ch.id === channelId) {
+          return {
+            ...ch,
+            layers: ch.layers.map(layer => {
+              if (layer.id === layerId) {
+                let newSelectedItems;
+                if (mode === 'replace') {
+                  newSelectedItems = itemIds;
+                } else if (mode === 'toggle') {
+                  // Toggle selection of specified items
+                  newSelectedItems = [...layer.selectedItems];
+                  itemIds.forEach(id => {
+                    const index = newSelectedItems.indexOf(id);
+                    if (index >= 0) {
+                      newSelectedItems.splice(index, 1);
+                    } else {
+                      newSelectedItems.push(id);
+                    }
+                  });
+                } else if (mode === 'add') {
+                  newSelectedItems = [...new Set([...layer.selectedItems, ...itemIds])];
+                }
+                return { ...layer, selectedItems: newSelectedItems };
+              }
+              return layer;
+            })
+          };
+        }
+        return ch;
+      })
+    }));
+  }, []);
+
+  // Delete selected items with undo support
+  const deleteSelectedItems = useCallback((channelId, layerId) => {
+    setState(prev => {
+      const channel = prev.channels.find(ch => ch.id === channelId);
+      if (!channel) return prev;
+
+      const layer = channel.layers.find(l => l.id === layerId);
+      if (!layer || layer.selectedItems.length === 0) return prev;
+
+      // Find items to delete
+      const itemsToDelete = layer.playlist.filter(item => layer.selectedItems.includes(item.id));
+      if (itemsToDelete.length === 0) return prev;
+
+      // Save deleted items for undo (with their indices)
+      const deletedBatch = {
+        items: itemsToDelete.map(item => ({
+          item,
+          index: layer.playlist.findIndex(p => p.id === item.id)
+        })),
+        timestamp: Date.now()
+      };
+
+      return {
+        ...prev,
+        channels: prev.channels.map(ch => {
+          if (ch.id === channelId) {
+            return {
+              ...ch,
+              layers: ch.layers.map(l => {
+                if (l.id === layerId) {
+                  return {
+                    ...l,
+                    playlist: l.playlist.filter(item => !layer.selectedItems.includes(item.id)),
+                    selectedItems: [],
+                    deletedItems: [...l.deletedItems, deletedBatch].slice(-10) // Keep last 10 undo states
+                  };
+                }
+                return l;
+              })
+            };
+          }
+          return ch;
+        })
+      };
+    });
+  }, []);
+
+  // Undo last delete operation
+  const undoDelete = useCallback((channelId, layerId) => {
+    setState(prev => {
+      const channel = prev.channels.find(ch => ch.id === channelId);
+      if (!channel) return prev;
+
+      const layer = channel.layers.find(l => l.id === layerId);
+      if (!layer || layer.deletedItems.length === 0) return prev;
+
+      // Pop last deleted batch
+      const lastBatch = layer.deletedItems[layer.deletedItems.length - 1];
+
+      // Restore items at their original positions
+      const newPlaylist = [...layer.playlist];
+      lastBatch.items
+        .sort((a, b) => a.index - b.index) // Insert in order
+        .forEach(({ item, index }) => {
+          newPlaylist.splice(Math.min(index, newPlaylist.length), 0, item);
+        });
+
+      return {
+        ...prev,
+        channels: prev.channels.map(ch => {
+          if (ch.id === channelId) {
+            return {
+              ...ch,
+              layers: ch.layers.map(l => {
+                if (l.id === layerId) {
+                  return {
+                    ...l,
+                    playlist: newPlaylist,
+                    deletedItems: l.deletedItems.slice(0, -1)
+                  };
+                }
+                return l;
+              })
+            };
+          }
+          return ch;
+        })
+      };
+    });
   }, []);
 
   // Toggle playlist mode
@@ -615,8 +1081,23 @@ export function AppProvider({ children }) {
         })
       }));
 
-      // Load next item in background if playlist mode
-      if (layer.playlistMode && index < layer.playlist.length - 1) {
+      // Handle image auto-advance with duration timeout
+      const layerKey = `${channelId}-${layerId}`;
+      if (imageTimersRef.current[layerKey]) {
+        clearTimeout(imageTimersRef.current[layerKey]);
+        delete imageTimersRef.current[layerKey];
+      }
+
+      // If it's an image and playlist mode is enabled, set auto-advance timeout
+      if (item.type === 'image' && layer.playlistMode && item.duration > 0 && !layer.loopItem) {
+        imageTimersRef.current[layerKey] = setTimeout(() => {
+          autoAdvanceNext(channelId, layerId);
+          delete imageTimersRef.current[layerKey];
+        }, item.duration * 1000);
+      }
+
+      // Load next item in background if playlist mode (for videos)
+      if (layer.playlistMode && index < layer.playlist.length - 1 && item.type !== 'image') {
         const nextItem = layer.playlist[index + 1];
         await casparCommands.loadBg(connection.casparCG, channelId, layerId, nextItem.path, {
           auto: true,
@@ -631,7 +1112,7 @@ export function AppProvider({ children }) {
       console.error('Failed to play item:', error);
       return false;
     }
-  }, [connection.casparCG, connection.isConnected, state.channels]);
+  }, [connection.casparCG, connection.isConnected, state.channels, autoAdvanceNext]);
 
   // Pause playback
   const pausePlayback = useCallback(async (channelId, layerId) => {
@@ -776,6 +1257,19 @@ export function AppProvider({ children }) {
 
   // Expand/collapse channel
   const toggleExpandChannel = useCallback((channelId) => {
+    // Handle null case - return to multi-channel view
+    if (channelId === null) {
+      setState(prev => ({
+        ...prev,
+        ui: {
+          ...prev.ui,
+          currentView: 'multi',
+          expandedChannel: null
+        }
+      }));
+      return;
+    }
+
     const channel = state.channels.find(ch => ch.id === channelId);
     if (channel) {
       setState(prev => ({
@@ -896,20 +1390,82 @@ export function AppProvider({ children }) {
   }, []);
 
   const executeMacro = useCallback(async (macro) => {
-    if (!connection.casparCG || !connection.isConnected) {
+    // Check if macro has any client commands
+    const hasClientCommands = macro.commands?.some(cmd => cmd.type?.startsWith('CLIENT_'));
+
+    // Only require connection for non-client-only macros
+    if (!hasClientCommands && (!connection.casparCG || !connection.isConnected)) {
       console.warn('Cannot execute macro: Not connected to CasparCG');
       return { success: false, error: 'Not connected' };
     }
 
     try {
-      const result = await runMacro(macro, connection.casparCG);
+      // Create app context object for client commands
+      const appContext = {
+        togglePlaylistMode,
+        toggleLoopMode,
+        toggleLoopItem,
+        addChannel,
+        addLayer,
+        nextItem,
+        prevItem,
+        loadRundown
+      };
+
+      const result = await runMacro(macro, connection.casparCG, { appContext });
       console.log('Macro executed:', result);
       return result;
     } catch (error) {
       console.error('Macro execution failed:', error);
       return { success: false, error: error.message };
     }
-  }, [connection.casparCG, connection.isConnected]);
+  }, [connection.casparCG, connection.isConnected, togglePlaylistMode, toggleLoopMode, toggleLoopItem, addChannel, addLayer, nextItem, prevItem]);
+
+  // Rundown management
+  const loadRundownList = async () => {
+    const { ipcRenderer } = window.require('electron');
+    const list = await ipcRenderer.invoke('rundown:list');
+    setRundowns(list);
+  };
+
+  const saveRundown = useCallback(async (name) => {
+    const { ipcRenderer } = window.require('electron');
+    const rundownData = {
+      channels: state.channels,
+      ui: state.ui
+    };
+    const result = await ipcRenderer.invoke('rundown:save', name, rundownData);
+    if (result.success) {
+      await loadRundownList();
+    }
+    return result;
+  }, [state.channels, state.ui]);
+
+  const loadRundown = useCallback(async (name) => {
+    const { ipcRenderer } = window.require('electron');
+    const result = await ipcRenderer.invoke('rundown:load', name);
+    if (result.success && result.data) {
+      setState(prev => ({
+        ...prev,
+        channels: result.data.channels || [],
+        ui: {
+          ...prev.ui,
+          ...result.data.ui
+        }
+      }));
+      return { success: true };
+    }
+    return result;
+  }, []);
+
+  const deleteRundown = useCallback(async (name) => {
+    const { ipcRenderer } = window.require('electron');
+    const result = await ipcRenderer.invoke('rundown:delete', name);
+    if (result.success) {
+      await loadRundownList();
+    }
+    return result;
+  }, []);
 
   const value = {
     state,
@@ -918,6 +1474,10 @@ export function AppProvider({ children }) {
     setConnection,
     showConnectionDialog,
     setShowConnectionDialog,
+    showSettings,
+    setShowSettings,
+    settings,
+    updateSettings,
     connectToCaspar,
     disconnect,
     addChannel,
@@ -928,6 +1488,10 @@ export function AppProvider({ children }) {
     selectPlaylistItem,
     removePlaylistItem,
     reorderPlaylistItems,
+    updateItemDuration,
+    selectPlaylistItems,
+    deleteSelectedItems,
+    undoDelete,
     togglePlaylistMode,
     toggleLoopMode,
     toggleLoopItem,
@@ -950,7 +1514,12 @@ export function AppProvider({ children }) {
     createMacro,
     updateMacro,
     deleteMacro,
-    executeMacro
+    executeMacro,
+    rundowns,
+    loadRundownList,
+    saveRundown,
+    loadRundown,
+    deleteRundown
   };
 
   return (

@@ -113,7 +113,8 @@
 
 .command-type {
   flex: 1;
-  max-width: 150px;
+  max-width: 200px;
+  min-width: 160px;
 }
 
 .command-actions {

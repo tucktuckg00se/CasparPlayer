@@ -75,6 +75,28 @@
   font-family: 'Courier New', monospace;
 }
 
+.header-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  margin-right: 12px;
+}
+
+.header-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
 .status-indicator {
   cursor: pointer;
   user-select: none;

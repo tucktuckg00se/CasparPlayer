@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createMacroTemplate, createCommandTemplate, COMMAND_TYPES } from '../services/macroExecutor';
+import StyledSelect from './StyledSelect';
 import './MacroEditor.css';
 
 export default function MacroEditor({ macro, onSave, onCancel }) {
@@ -179,15 +180,18 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
       <div className="command-header">
         <span className="command-index">{index + 1}</span>
 
-        <select
-          className="input command-type"
+        <StyledSelect
+          className="command-type"
           value={command.type}
-          onChange={e => onUpdate({ type: e.target.value })}
-        >
-          {COMMAND_TYPES.map(type => (
-            <option key={type.value} value={type.value}>{type.label}</option>
-          ))}
-        </select>
+          onChange={(value) => onUpdate({ type: value })}
+          options={COMMAND_TYPES.map(t => ({
+            value: t.value,
+            label: t.label,
+            description: t.description,
+            category: t.category === 'caspar' ? 'CasparCG Commands' : 'Client Commands'
+          }))}
+          groupBy="category"
+        />
 
         <div className="command-actions">
           <button
