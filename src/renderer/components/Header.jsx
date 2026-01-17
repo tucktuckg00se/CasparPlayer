@@ -21,10 +21,10 @@ export default function Header() {
     <header className="app-header">
       <div className="header-left">
         <div className="app-logo">
-          <div className="logo-icon">CG</div>
+          <div className="logo-icon">CP</div>
           <div className="logo-text">
-            <div className="logo-title">CasparCG</div>
-            <div className="logo-subtitle">Advanced Client</div>
+            <div className="logo-title">CasparPlayer</div>
+            <div className="logo-subtitle">Broadcast Playout</div>
           </div>
         </div>
       </div>

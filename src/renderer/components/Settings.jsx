@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import StyledSelect from './StyledSelect';
 import './Settings.css';
 
 export default function Settings({ onClose }) {
@@ -36,7 +37,10 @@ export default function Settings({ onClose }) {
     try {
       const folderPath = await ipcRenderer.invoke('media:selectFolder');
       if (folderPath) {
-        handleChange('mediaFolderPath', folderPath);
+        // Update local state
+        setEditedSettings(prev => ({ ...prev, mediaFolderPath: folderPath }));
+        // Auto-save settings immediately
+        await updateSettings({ ...editedSettings, mediaFolderPath: folderPath });
         // Also scan and set the media folder
         const result = await ipcRenderer.invoke('media:scanFolder', folderPath);
         if (result.success) {
@@ -170,6 +174,68 @@ export default function Settings({ onClose }) {
                   />
                 </div>
               </div>
+
+              <h3 className="settings-section-title" style={{ marginTop: '20px' }}>MSE Streaming Options</h3>
+
+              <div className="settings-row">
+                <div className="input-group">
+                  <label htmlFor="previewScale">Preview Resolution</label>
+                  <StyledSelect
+                    value={editedSettings.previewScale || '384:216'}
+                    onChange={(value) => handleChange('previewScale', value)}
+                    options={[
+                      { value: '288:162', label: '288x162 (Low)' },
+                      { value: '384:216', label: '384x216 (Default)' },
+                      { value: '480:270', label: '480x270 (Medium)' },
+                      { value: '640:360', label: '640x360 (High)' }
+                    ]}
+                  />
+                </div>
+
+                <div className="input-group">
+                  <label htmlFor="previewPreset">Encoding Preset</label>
+                  <StyledSelect
+                    value={editedSettings.previewPreset || 'ultrafast'}
+                    onChange={(value) => handleChange('previewPreset', value)}
+                    options={[
+                      { value: 'ultrafast', label: 'Ultrafast (Lowest Latency)' },
+                      { value: 'superfast', label: 'Superfast' },
+                      { value: 'veryfast', label: 'Veryfast' },
+                      { value: 'faster', label: 'Faster' }
+                    ]}
+                  />
+                </div>
+              </div>
+
+              <div className="settings-row">
+                <div className="input-group">
+                  <label htmlFor="previewTune">Encoding Tune</label>
+                  <StyledSelect
+                    value={editedSettings.previewTune || 'zerolatency'}
+                    onChange={(value) => handleChange('previewTune', value)}
+                    options={[
+                      { value: 'zerolatency', label: 'Zero Latency (Live)' },
+                      { value: 'film', label: 'Film' },
+                      { value: 'animation', label: 'Animation' }
+                    ]}
+                  />
+                </div>
+
+                <div className="input-group">
+                  <label htmlFor="previewAudioBitrate">Audio Bitrate</label>
+                  <StyledSelect
+                    value={editedSettings.previewAudioBitrate || '128k'}
+                    onChange={(value) => handleChange('previewAudioBitrate', value)}
+                    options={[
+                      { value: '64k', label: '64k (Low)' },
+                      { value: '96k', label: '96k' },
+                      { value: '128k', label: '128k (Default)' },
+                      { value: '192k', label: '192k (High)' }
+                    ]}
+                  />
+                </div>
+              </div>
+              <span className="input-hint">These settings affect the fmp4 streaming from CasparCG to the preview window</span>
             </div>
           )}
 

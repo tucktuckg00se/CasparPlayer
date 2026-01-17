@@ -100,23 +100,48 @@ export default function FileBrowser() {
     toggleFolderExpand(folderId);
   }, [toggleFolderExpand]);
 
+  // Determine if we have a saved media folder path
+  const hasSavedMediaFolder = settings.mediaFolderPath && state.media.rootPath;
+
   return (
     <div className="file-browser">
       <div className="file-browser-header">
-        <button className="btn btn-primary" onClick={handleOpenFolder} disabled={isScanning}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeWidth="2"/>
-          </svg>
-          {isScanning ? 'Scanning...' : 'Open Media Folder'}
-        </button>
-        {state.media.rootPath && (
-          <button className="btn btn-icon" onClick={handleRefresh} disabled={isScanning} title="Refresh">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="M23 4v6h-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M1 20v-6h6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
+        {hasSavedMediaFolder ? (
+          // When media folder is saved, show Refresh as primary and Change Folder as secondary
+          <>
+            <button className="btn btn-primary" onClick={handleRefresh} disabled={isScanning}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M23 4v6h-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M1 20v-6h6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {isScanning ? 'Scanning...' : 'Refresh'}
+            </button>
+            <button className="btn btn-icon" onClick={handleOpenFolder} disabled={isScanning} title="Change Folder">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeWidth="2"/>
+              </svg>
+            </button>
+          </>
+        ) : (
+          // When no saved folder, show Open Media Folder button
+          <>
+            <button className="btn btn-primary" onClick={handleOpenFolder} disabled={isScanning}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeWidth="2"/>
+              </svg>
+              {isScanning ? 'Scanning...' : 'Open Media Folder'}
+            </button>
+            {state.media.rootPath && (
+              <button className="btn btn-icon" onClick={handleRefresh} disabled={isScanning} title="Refresh">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M23 4v6h-6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M1 20v-6h6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+            )}
+          </>
         )}
       </div>
 

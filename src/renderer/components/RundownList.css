@@ -6,14 +6,25 @@
 
 .rundown-list-header {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   padding: 12px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.rundown-list-header .btn-primary {
+.rundown-list-header .btn-primary,
+.rundown-list-header .btn-secondary {
   flex: 1;
   justify-content: center;
+}
+
+.rundown-list-header .btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+}
+
+.rundown-list-header .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
 }
 
 .rundown-list-header .btn-icon {
@@ -137,4 +148,29 @@
 .rundown-actions .btn-sm {
   padding: 5px 10px;
   font-size: 11px;
+}
+
+/* Larger delete button for better visibility */
+.rundown-actions .btn-danger-icon {
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border-radius: 6px;
+  background: rgba(255, 68, 68, 0.1);
+  border: none;
+  color: var(--error-light);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.rundown-actions .btn-danger-icon:hover {
+  background: rgba(255, 68, 68, 0.2);
+}
+
+.rundown-actions .btn-danger-icon svg {
+  width: 16px;
+  height: 16px;
 }

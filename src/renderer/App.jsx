@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import './styles/App.css';
 import ConnectionDialog from './components/ConnectionDialog';
 import Settings from './components/Settings';
@@ -15,8 +15,14 @@ function AppContent() {
     setShowConnectionDialog,
     showSettings,
     setShowSettings,
-    connection
+    connection,
+    connectToCaspar,
+    settings,
+    saveRundown,
+    rundowns
   } = useApp();
+  const autoConnectAttempted = useRef(false);
+  const [currentRundownName, setCurrentRundownName] = useState(null);
 
   useEffect(() => {
     // Remove loading screen when app is ready
@@ -29,12 +35,55 @@ function AppContent() {
     }
   }, []);
 
-  // Show connection dialog on first launch or when disconnected
+  // Auto-connect on startup with saved settings (no dialog)
   useEffect(() => {
-    if (!connection.isConnected && !showConnectionDialog) {
-      setShowConnectionDialog(true);
+    if (!autoConnectAttempted.current && !connection.isConnected && settings.host) {
+      autoConnectAttempted.current = true;
+      // Attempt silent auto-connect
+      connectToCaspar(
+        settings.host || '127.0.0.1',
+        settings.port || 5250,
+        settings.oscPort || 6250,
+        connection.previewUrl || ''
+      ).catch((err) => {
+        console.log('Auto-connect failed:', err.message);
+        // Don't show dialog automatically - user can click status to connect
+      });
     }
-  }, [connection.isConnected]);
+  }, [settings.host, settings.port, settings.oscPort, connection.isConnected, connectToCaspar, connection.previewUrl]);
+
+  // Handle Ctrl+S for saving rundown
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSaveRundown();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentRundownName, state.channels]);
+
+  const handleSaveRundown = async () => {
+    if (state.channels.length === 0) {
+      return; // Nothing to save
+    }
+
+    if (currentRundownName) {
+      // Quick save to existing rundown
+      await saveRundown(currentRundownName);
+    } else {
+      // Prompt for name
+      const name = window.prompt('Enter rundown name:');
+      if (name && name.trim()) {
+        const result = await saveRundown(name.trim());
+        if (result.success) {
+          setCurrentRundownName(name.trim());
+        }
+      }
+    }
+  };
 
   return (
     <div className="app">

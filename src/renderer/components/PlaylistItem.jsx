@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { DRAG_TYPES, setDragEventData } from './DragDropProvider';
-import { formatDuration } from '../utils/timecode';
+import { formatDuration, framesToTimecode } from '../utils/timecode';
+import TimecodeInput from './TimecodeInput';
 import './PlaylistItem.css';
 
 export default function PlaylistItem({
@@ -14,11 +15,23 @@ export default function PlaylistItem({
   layerId,
   onItemClick
 }) {
-  const { removePlaylistItem, playItem, updateItemDuration } = useApp();
+  const { removePlaylistItem, playItem, updateItemDuration, updateItemInOutPoints } = useApp();
   const isMacro = item.type === 'macro';
   const isImage = item.type === 'image';
+  const isVideo = item.type === 'video';
   const [editingDuration, setEditingDuration] = useState(false);
   const [durationValue, setDurationValue] = useState(item.duration.toString());
+  const [showInOutEditor, setShowInOutEditor] = useState(false);
+  const [inPointFrames, setInPointFrames] = useState(item.inPointFrames ?? null);
+  const [outPointFrames, setOutPointFrames] = useState(item.outPointFrames ?? null);
+  const frameRate = item.frameRate ?? 25;
+  const maxFrames = item.duration > 0 ? Math.floor(item.duration * frameRate) : null;
+
+  // Sync local state when item prop changes
+  useEffect(() => {
+    setInPointFrames(item.inPointFrames ?? null);
+    setOutPointFrames(item.outPointFrames ?? null);
+  }, [item.inPointFrames, item.outPointFrames]);
 
   const handleClick = (e) => {
     if (onItemClick) {
@@ -94,8 +107,8 @@ export default function PlaylistItem({
       </div>
 
       <div className="item-info">
-        <span className="item-name" title={item.relativePath || item.name}>
-          {item.relativePath || item.name}
+        <span className="item-name" title={item.relativePath || item.path || item.name}>
+          {item.name}
         </span>
         {item.resolution && (
           <span className="item-meta">{item.resolution}</span>
@@ -103,8 +116,28 @@ export default function PlaylistItem({
       </div>
 
       <div className="item-duration">
-        {item.inPoint !== null || item.outPoint !== null ? (
-          <span className="item-io" title="Has In/Out points">IO</span>
+        {item.inPointFrames !== null || item.outPointFrames !== null ? (
+          <span
+            className="item-io"
+            title={`In: ${item.inPointFrames !== null ? framesToTimecode(item.inPointFrames, frameRate) : '-'} / Out: ${item.outPointFrames !== null ? framesToTimecode(item.outPointFrames, frameRate) : '-'}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowInOutEditor(!showInOutEditor);
+            }}
+          >
+            IO
+          </span>
+        ) : isVideo ? (
+          <span
+            className="item-io-add"
+            title="Click to set In/Out points (HH:MM:SS:FF)"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowInOutEditor(!showInOutEditor);
+            }}
+          >
+            +IO
+          </span>
         ) : null}
         {isImage && editingDuration ? (
           <input
@@ -121,14 +154,66 @@ export default function PlaylistItem({
           />
         ) : item.duration > 0 ? (
           <span
-            className={isImage ? 'duration-editable' : ''}
+            className={isImage ? 'duration-editable' : 'duration-display'}
             onClick={handleDurationClick}
-            title={isImage ? 'Click to edit duration' : ''}
+            title={isImage ? 'Click to edit duration' : `Duration: ${formatDuration(item.duration)}`}
           >
             {formatDuration(item.duration)}
           </span>
-        ) : null}
+        ) : (
+          <span className="duration-display duration-unknown">--:--</span>
+        )}
       </div>
+
+      {/* In/Out Point Editor with Timecode inputs */}
+      {showInOutEditor && isVideo && (
+        <div className="item-io-editor" onClick={e => e.stopPropagation()}>
+          <div className="io-row">
+            <label>In:</label>
+            <TimecodeInput
+              value={inPointFrames}
+              onChange={(frames) => {
+                setInPointFrames(frames);
+                updateItemInOutPoints(channelId, layerId, item.id, frames, outPointFrames);
+              }}
+              frameRate={frameRate}
+              maxFrames={maxFrames}
+            />
+          </div>
+          <div className="io-row">
+            <label>Out:</label>
+            <TimecodeInput
+              value={outPointFrames}
+              onChange={(frames) => {
+                setOutPointFrames(frames);
+                updateItemInOutPoints(channelId, layerId, item.id, inPointFrames, frames);
+              }}
+              frameRate={frameRate}
+              maxFrames={maxFrames}
+            />
+          </div>
+          <div className="io-row io-actions">
+            <button
+              className="io-clear-btn"
+              title="Clear In/Out points"
+              onClick={() => {
+                setInPointFrames(null);
+                setOutPointFrames(null);
+                updateItemInOutPoints(channelId, layerId, item.id, null, null);
+              }}
+            >
+              Clear
+            </button>
+            <button
+              className="io-done-btn"
+              title="Close editor"
+              onClick={() => setShowInOutEditor(false)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       <button
         className="item-remove"

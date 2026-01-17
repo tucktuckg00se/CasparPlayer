@@ -13,25 +13,22 @@ export default function LayerControls({ layer, channelId }) {
     prevItem,
     togglePlaylistMode,
     toggleLoopMode,
-    toggleLoopItem,
-    setInPoint,
-    setOutPoint,
-    clearInOutPoints
+    toggleLoopItem
   } = useApp();
 
   const isConnected = connection.isConnected;
   const hasItems = layer.playlist.length > 0;
-  const hasCurrentItem = layer.currentIndex >= 0;
 
   const handlePrevious = () => {
     prevItem(channelId, layer.id);
   };
 
   const handlePlay = () => {
-    if (layer.isPlaying) {
+    if (layer.isPaused) {
+      // Resume from paused state
       resumePlayback(channelId, layer.id);
-    } else if (hasItems) {
-      // If nothing selected, play first item
+    } else if (!layer.isPlaying && hasItems) {
+      // Start fresh playback
       const index = layer.currentIndex >= 0 ? layer.currentIndex : 0;
       playItem(channelId, layer.id, index);
     }
@@ -49,18 +46,6 @@ export default function LayerControls({ layer, channelId }) {
     nextItem(channelId, layer.id);
   };
 
-  const handleSetIn = () => {
-    setInPoint(channelId, layer.id, layer.currentTime);
-  };
-
-  const handleSetOut = () => {
-    setOutPoint(channelId, layer.id, layer.currentTime);
-  };
-
-  const handleClearIO = () => {
-    clearInOutPoints(channelId, layer.id);
-  };
-
   return (
     <div className="layer-controls">
       <div className="transport-controls">
@@ -75,7 +60,7 @@ export default function LayerControls({ layer, channelId }) {
           </svg>
         </button>
 
-        {layer.isPlaying ? (
+        {layer.isPlaying && !layer.isPaused ? (
           <button
             className="control-btn control-btn-primary"
             onClick={handlePause}
@@ -91,7 +76,7 @@ export default function LayerControls({ layer, channelId }) {
             className="control-btn control-btn-primary"
             onClick={handlePlay}
             disabled={!isConnected || !hasItems}
-            title="Play"
+            title={layer.isPaused ? "Resume" : "Play"}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7z"/>
@@ -145,35 +130,6 @@ export default function LayerControls({ layer, channelId }) {
           title="Loop Item - Repeat current item"
         >
           LI
-        </button>
-      </div>
-
-      <div className="io-controls">
-        <button
-          className="io-btn"
-          onClick={handleSetIn}
-          disabled={!hasCurrentItem}
-          title="Set In Point"
-        >
-          IN
-        </button>
-
-        <button
-          className="io-btn"
-          onClick={handleSetOut}
-          disabled={!hasCurrentItem}
-          title="Set Out Point"
-        >
-          OUT
-        </button>
-
-        <button
-          className="io-btn io-btn-clear"
-          onClick={handleClearIO}
-          disabled={!hasCurrentItem}
-          title="Clear In/Out Points"
-        >
-          CLR
         </button>
       </div>
     </div>

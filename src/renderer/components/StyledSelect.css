@@ -52,14 +52,19 @@
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  background: rgba(30, 35, 45, 0.98);
-  backdrop-filter: blur(20px);
+  background: rgb(30, 35, 45);  /* Fully opaque - no alpha channel */
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   z-index: 1000;
   animation: dropdownSlide 0.15s ease-out;
   overflow: hidden;
+}
+
+/* Portal dropdown rendered to document.body - needs fixed positioning */
+.styled-select-dropdown-portal {
+  position: fixed !important;
+  z-index: 10000 !important;
 }
 
 @keyframes dropdownSlide {

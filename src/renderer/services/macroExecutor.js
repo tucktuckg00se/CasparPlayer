@@ -8,10 +8,6 @@ export async function executeMacro(macro, casparCG, context = {}) {
     throw new Error('Invalid macro: no commands');
   }
 
-  if (!casparCG) {
-    throw new Error('Not connected to CasparCG');
-  }
-
   const results = [];
   let hasError = false;
 
@@ -21,8 +17,18 @@ export async function executeMacro(macro, casparCG, context = {}) {
     }
 
     try {
-      const result = await executeCommand(command, casparCG, context);
-      results.push({ command, success: true, result });
+      // Check if this is a client-side command first (doesn't need CasparCG connection)
+      if (command.type && command.type.startsWith('CLIENT_')) {
+        const result = await executeClientCommand(command.type, command.channel, command.layer, command.params || {}, context);
+        results.push({ command, success: true, result });
+      } else {
+        // Server commands require CasparCG connection
+        if (!casparCG) {
+          throw new Error('Not connected to CasparCG');
+        }
+        const result = await executeCommand(command, casparCG, context);
+        results.push({ command, success: true, result });
+      }
 
       // Wait if delay is specified
       if (command.delay > 0) {
@@ -115,7 +121,16 @@ async function executeCommand(command, casparCG, context) {
     case 'CUSTOM':
       // Send raw AMCP command
       if (resolvedParams.amcp) {
-        return await casparCG.do(resolvedParams.amcp);
+        // Use executeCommand or cgDo for raw AMCP strings
+        // casparcg-connection v6.3.3 uses different method names
+        if (typeof casparCG.executeCommand === 'function') {
+          return await casparCG.executeCommand(resolvedParams.amcp);
+        } else if (typeof casparCG.cgDo === 'function') {
+          return await casparCG.cgDo(resolvedParams.amcp);
+        } else {
+          // Fallback: parse and execute via appropriate method
+          return await casparCommands.executeRawCommand(casparCG, resolvedParams.amcp);
+        }
       }
       throw new Error('Custom command requires amcp parameter');
 

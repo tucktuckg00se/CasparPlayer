@@ -3,7 +3,13 @@
     "allow": [
       "Bash(npm run lint)",
       "Bash(npx eslint:*)",
-      "Bash(npm run webpack:*)"
+      "Bash(npm run webpack:*)",
+      "Bash(dir \"c:\\\\Users\\\\m_t_w\\\\Documents\\\\claude-projects\\\\casparcg-electron-1-16-2026\" /b /s)",
+      "Bash(dir \"C:\\\\Users\\\\m_t_w\\\\Documents\\\\claude-projects\\\\casparcg-electron-1-16-2026\" /b)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

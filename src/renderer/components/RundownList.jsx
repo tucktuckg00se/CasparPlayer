@@ -1,14 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import './RundownList.css';
 
 export default function RundownList() {
-  const { rundowns, saveRundown, loadRundown, deleteRundown, loadRundownList } = useApp();
+  const { rundowns, saveRundown, loadRundown, deleteRundown, loadRundownList, clearAllChannels } = useApp();
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [rundownName, setRundownName] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(null);
   const [error, setError] = useState(null);
+  const inputRef = useRef(null);
+
+  // Focus input with a small delay when save dialog opens
+  useEffect(() => {
+    if (showSaveDialog && inputRef.current) {
+      const timeout = setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 50);
+      return () => clearTimeout(timeout);
+    }
+  }, [showSaveDialog]);
 
   const handleSaveClick = () => {
     setShowSaveDialog(true);
@@ -71,16 +83,29 @@ export default function RundownList() {
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleNewRundown = () => {
+    if (window.confirm('Create a new rundown? This will clear all current channels and playlists.')) {
+      clearAllChannels();
+    }
+  };
+
   return (
     <div className="rundown-list">
       <div className="rundown-list-header">
+        <button className="btn btn-secondary" onClick={handleNewRundown} title="New Rundown">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <line x1="12" y1="5" x2="12" y2="19" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="5" y1="12" x2="19" y2="12" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          New
+        </button>
         <button className="btn btn-primary" onClick={handleSaveClick}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" strokeWidth="2"/>
             <polyline points="17 21 17 13 7 13 7 21" strokeWidth="2"/>
             <polyline points="7 3 7 8 15 8" strokeWidth="2"/>
           </svg>
-          Save Current
+          Save
         </button>
         <button className="btn btn-icon" onClick={loadRundownList} title="Refresh">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -104,12 +129,12 @@ export default function RundownList() {
         <div className="save-dialog">
           <form onSubmit={handleSave}>
             <input
+              ref={inputRef}
               type="text"
               className="input"
               value={rundownName}
               onChange={(e) => setRundownName(e.target.value)}
               placeholder="Enter rundown name..."
-              autoFocus
             />
             <div className="save-dialog-actions">
               <button type="button" className="btn" onClick={() => setShowSaveDialog(false)}>

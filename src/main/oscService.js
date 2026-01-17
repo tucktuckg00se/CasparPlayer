@@ -3,6 +3,9 @@ const osc = require('node-osc');
 let oscServer = null;
 let messageCallback = null;
 
+// Debug mode - set to true for verbose logging
+const DEBUG_OSC = true;
+
 function start(port, onMessage) {
   return new Promise((resolve, reject) => {
     try {
@@ -12,7 +15,10 @@ function start(port, onMessage) {
 
       messageCallback = onMessage;
 
+      // Bind to 0.0.0.0 to accept messages from any interface
       oscServer = new osc.Server(port, '0.0.0.0');
+
+      console.log(`[OSC] Server binding to 0.0.0.0:${port}...`);
 
       oscServer.on('message', (msg, rinfo) => {
         const address = msg[0];
@@ -21,6 +27,15 @@ function start(port, onMessage) {
         // Parse the OSC address to extract channel and layer info
         // CasparCG OSC format: /channel/[channel]/stage/layer/[layer]/...
         const parsed = parseOscAddress(address);
+
+        // Debug logging
+        if (DEBUG_OSC) {
+          // Log all messages for debugging, not just time updates
+          console.log(`[OSC] Message from ${rinfo.address}:${rinfo.port} - ${address}`, args);
+          if (parsed.type) {
+            console.log(`[OSC] Parsed: channel=${parsed.channel}, layer=${parsed.layer}, type=${parsed.type}`);
+          }
+        }
 
         if (messageCallback) {
           messageCallback({
@@ -33,13 +48,17 @@ function start(port, onMessage) {
       });
 
       oscServer.on('error', (err) => {
-        console.error('OSC Server error:', err);
+        console.error('[OSC] Server error:', err);
       });
 
-      console.log(`OSC Server started on port ${port}`);
+      oscServer.on('listening', () => {
+        console.log(`[OSC] Server successfully listening on port ${port}`);
+      });
+
+      console.log(`[OSC] Server started on port ${port}`);
       resolve(true);
     } catch (error) {
-      console.error('Failed to start OSC server:', error);
+      console.error('[OSC] Failed to start OSC server:', error);
       reject(error);
     }
   });

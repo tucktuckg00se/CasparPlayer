@@ -1,13 +1,27 @@
 // OSC Message Handler for CasparCG time updates
 
+// Debug mode - set to true for verbose logging
+const DEBUG_OSC_HANDLER = true;
+
 export function processOscMessage(message, updateCallback) {
   const { address, args, parsed } = message;
 
+  if (DEBUG_OSC_HANDLER) {
+    console.log('[OSC Handler] Received message:', { address, args, parsed });
+  }
+
   if (!parsed || !parsed.channel || !parsed.layer) {
+    if (DEBUG_OSC_HANDLER) {
+      console.log('[OSC Handler] Skipping - no channel/layer parsed');
+    }
     return;
   }
 
   const { channel, layer, type } = parsed;
+
+  if (DEBUG_OSC_HANDLER && type) {
+    console.log(`[OSC Handler] Processing: channel=${channel}, layer=${layer}, type=${type}, args=`, args);
+  }
 
   switch (type) {
     case 'time':

@@ -1,0 +1,77 @@
+.timecode-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timecode-input.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.timecode-fields {
+  display: flex;
+  align-items: center;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
+.timecode-fields:focus-within {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(0, 170, 136, 0.15);
+}
+
+.timecode-field {
+  width: 20px;
+  padding: 2px 0;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  text-align: center;
+  outline: none;
+}
+
+.timecode-field::placeholder {
+  color: var(--text-tertiary);
+  opacity: 0.5;
+}
+
+.timecode-field:focus {
+  background: rgba(0, 170, 136, 0.1);
+  border-radius: 2px;
+}
+
+.timecode-separator {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  user-select: none;
+}
+
+.timecode-fps {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* Compact version for inline use */
+.timecode-input.compact .timecode-fields {
+  padding: 1px 2px;
+}
+
+.timecode-input.compact .timecode-field {
+  width: 16px;
+  font-size: 10px;
+}
+
+.timecode-input.compact .timecode-separator {
+  font-size: 10px;
+}
+
+.timecode-input.compact .timecode-fps {
+  font-size: 8px;
+}

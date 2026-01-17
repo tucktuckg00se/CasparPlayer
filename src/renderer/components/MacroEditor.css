@@ -72,8 +72,22 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 300px;
-  overflow-y: auto;
+  /* Removed max-height and overflow to let modal body handle scrolling
+     and prevent dropdown clipping */
+}
+
+/* Ensure dropdowns can overflow the container */
+.command-editor {
+  overflow: visible;
+}
+
+.command-type {
+  position: relative;
+  z-index: 10;
+}
+
+.command-type select {
+  position: relative;
 }
 
 .commands-empty {

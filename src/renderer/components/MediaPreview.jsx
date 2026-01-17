@@ -5,28 +5,64 @@ import './MediaPreview.css';
 export default function MediaPreview({ file }) {
   const [thumbnail, setThumbnail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [thumbnailError, setThumbnailError] = useState(false);
 
   useEffect(() => {
     if (file && (file.type === 'video' || file.type === 'image')) {
       loadThumbnail(file);
     } else {
       setThumbnail(null);
+      setThumbnailError(false);
     }
   }, [file]);
 
   const loadThumbnail = async (file) => {
     setIsLoading(true);
+    setThumbnailError(false);
+
+    // For images, try using direct file URL first (faster)
+    if (file.type === 'image') {
+      try {
+        // Use file:// URL directly for images
+        const directUrl = `file://${file.path.replace(/\\/g, '/')}`;
+        setThumbnail(directUrl);
+        setIsLoading(false);
+        return;
+      } catch (e) {
+        console.log('Direct image load failed, trying thumbnail generator');
+      }
+    }
+
+    // For videos or fallback, use thumbnail generator
     try {
       const { ipcRenderer } = window.require('electron');
       const result = await ipcRenderer.invoke('media:generateThumbnail', file.path, file.type);
       if (result?.thumbnail) {
-        setThumbnail(`file://${result.thumbnail}?${Date.now()}`);
+        setThumbnail(`file://${result.thumbnail.replace(/\\/g, '/')}?${Date.now()}`);
+      } else if (result?.error) {
+        console.warn('Thumbnail generation failed:', result.error);
+        setThumbnailError(true);
+        // For images, fall back to direct file URL even if thumbnail failed
+        if (file.type === 'image') {
+          setThumbnail(`file://${file.path.replace(/\\/g, '/')}`);
+        }
       }
     } catch (error) {
       console.error('Error loading thumbnail:', error);
+      setThumbnailError(true);
+      // For images, fall back to direct file URL
+      if (file.type === 'image') {
+        setThumbnail(`file://${file.path.replace(/\\/g, '/')}`);
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleImageError = () => {
+    console.warn('Thumbnail image failed to load');
+    setThumbnailError(true);
+    setThumbnail(null);
   };
 
   if (!file) {
@@ -50,7 +86,7 @@ export default function MediaPreview({ file }) {
             <div className="loading-spinner" />
           </div>
         ) : thumbnail ? (
-          <img src={thumbnail} alt={file.name} />
+          <img src={thumbnail} alt={file.name} onError={handleImageError} />
         ) : (
           <div className="preview-placeholder">
             {getTypeIcon(file.type)}

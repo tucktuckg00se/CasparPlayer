@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import './StyledSelect.css';
 
 export default function StyledSelect({
@@ -11,7 +12,9 @@ export default function StyledSelect({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0, width: 0 });
   const containerRef = useRef(null);
+  const dropdownRef = useRef(null);
   const searchRef = useRef(null);
 
   // Find the selected option
@@ -33,18 +36,35 @@ export default function StyledSelect({
       }, {})
     : { '': filteredOptions };
 
+  // Calculate dropdown position when opening
+  useEffect(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width
+      });
+    }
+  }, [isOpen]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
+      const clickedContainer = containerRef.current && containerRef.current.contains(e.target);
+      const clickedDropdown = dropdownRef.current && dropdownRef.current.contains(e.target);
+
+      if (!clickedContainer && !clickedDropdown) {
         setIsOpen(false);
         setSearchTerm('');
       }
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isOpen]);
 
   // Focus search input when dropdown opens
   useEffect(() => {
@@ -73,6 +93,65 @@ export default function StyledSelect({
     }
   };
 
+  // Render dropdown via portal to avoid clipping by parent overflow
+  const renderDropdown = () => {
+    if (!isOpen) return null;
+
+    const dropdown = (
+      <div
+        ref={dropdownRef}
+        className="styled-select-dropdown styled-select-dropdown-portal"
+        style={{
+          position: 'fixed',
+          top: dropdownPosition.top,
+          left: dropdownPosition.left,
+          width: dropdownPosition.width,
+          zIndex: 10000
+        }}
+      >
+        {options.length > 5 && (
+          <div className="styled-select-search">
+            <input
+              ref={searchRef}
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search..."
+            />
+          </div>
+        )}
+
+        <div className="styled-select-options">
+          {Object.entries(groupedOptions).map(([group, groupOptions]) => (
+            <div key={group || 'default'} className="styled-select-group">
+              {group && <div className="styled-select-group-label">{group}</div>}
+              {groupOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`styled-select-option ${option.value === value ? 'selected' : ''}`}
+                  onClick={() => handleSelect(option)}
+                >
+                  <span className="option-label">{option.label}</span>
+                  {option.description && (
+                    <span className="option-description">{option.description}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          ))}
+
+          {filteredOptions.length === 0 && (
+            <div className="styled-select-empty">No options found</div>
+          )}
+        </div>
+      </div>
+    );
+
+    return createPortal(dropdown, document.body);
+  };
+
   return (
     <div className={`styled-select ${className} ${isOpen ? 'open' : ''}`} ref={containerRef}>
       <button
@@ -96,47 +175,7 @@ export default function StyledSelect({
         </svg>
       </button>
 
-      {isOpen && (
-        <div className="styled-select-dropdown">
-          {options.length > 5 && (
-            <div className="styled-select-search">
-              <input
-                ref={searchRef}
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Search..."
-              />
-            </div>
-          )}
-
-          <div className="styled-select-options">
-            {Object.entries(groupedOptions).map(([group, groupOptions]) => (
-              <div key={group || 'default'} className="styled-select-group">
-                {group && <div className="styled-select-group-label">{group}</div>}
-                {groupOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`styled-select-option ${option.value === value ? 'selected' : ''}`}
-                    onClick={() => handleSelect(option)}
-                  >
-                    <span className="option-label">{option.label}</span>
-                    {option.description && (
-                      <span className="option-description">{option.description}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            ))}
-
-            {filteredOptions.length === 0 && (
-              <div className="styled-select-empty">No options found</div>
-            )}
-          </div>
-        </div>
-      )}
+      {renderDropdown()}
     </div>
   );
 }

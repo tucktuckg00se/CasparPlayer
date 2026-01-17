@@ -77,6 +77,24 @@ app.on('activate', () => {
   }
 });
 
+// Save state before quitting
+let isQuitting = false;
+app.on('before-quit', (event) => {
+  if (!isQuitting && mainWindow && !mainWindow.isDestroyed()) {
+    event.preventDefault();
+    isQuitting = true;
+    mainWindow.webContents.send('app:before-quit');
+    // Wait for save confirmation then quit
+    ipcMain.once('app:state-saved', () => {
+      app.quit();
+    });
+    // Timeout fallback - quit after 2 seconds even if save doesn't complete
+    setTimeout(() => {
+      app.quit();
+    }, 2000);
+  }
+});
+
 // IPC Handlers for config management
 ipcMain.handle('config:load', async () => {
   try {
@@ -297,14 +315,20 @@ ipcMain.handle('media:clearCache', async () => {
 // OSC Server management
 ipcMain.handle('osc:start', async (event, port) => {
   try {
+    console.log(`[Main] Starting OSC server on port ${port}...`);
     await oscService.start(port, (message) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
+        // Debug: Log when forwarding OSC message to renderer
+        if (message.parsed && message.parsed.type) {
+          console.log(`[Main->Renderer] Forwarding OSC: channel=${message.parsed.channel}, layer=${message.parsed.layer}, type=${message.parsed.type}`);
+        }
         mainWindow.webContents.send('osc:message', message);
       }
     });
+    console.log(`[Main] OSC server started successfully on port ${port}`);
     return { success: true };
   } catch (error) {
-    console.error('Error starting OSC server:', error);
+    console.error('[Main] Error starting OSC server:', error);
     return { success: false, error: error.message };
   }
 });
