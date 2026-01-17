@@ -1,0 +1,134 @@
+.macro-list {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.macro-list-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.macro-list-header .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.macro-list-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.empty-state p {
+  margin: 8px 0 0;
+  color: var(--text-tertiary);
+}
+
+.macros {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.macro-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  transition: all var(--transition);
+}
+
+.macro-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.macro-item:active {
+  cursor: grabbing;
+}
+
+.macro-color {
+  width: 4px;
+  height: 32px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.macro-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.macro-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.macro-description {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.macro-commands {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.macro-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.macro-item:hover .macro-actions {
+  opacity: 1;
+}
+
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.btn-icon:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.btn-danger-icon:hover {
+  background: rgba(255, 68, 68, 0.2);
+  color: var(--error-light);
+}

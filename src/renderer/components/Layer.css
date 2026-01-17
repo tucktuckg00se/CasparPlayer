@@ -1,0 +1,72 @@
+.layer {
+  width: 380px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.layer.expanded {
+  width: 100%;
+  min-width: 400px;
+}
+
+.layer-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.layer-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.layer-modes {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.mode-indicator {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-tertiary);
+  cursor: default;
+  transition: all var(--transition);
+}
+
+.mode-indicator.active {
+  background: rgba(0, 170, 136, 0.2);
+  color: var(--accent-secondary);
+}
+
+.btn-sm {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.btn-sm:hover {
+  background: rgba(255, 68, 68, 0.2);
+  color: var(--error-light);
+}

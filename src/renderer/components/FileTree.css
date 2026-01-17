@@ -1,0 +1,12 @@
+.file-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  user-select: none;
+}
+
+.file-tree-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-tertiary);
+}

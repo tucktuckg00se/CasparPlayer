@@ -1,0 +1,45 @@
+.time-display {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.time-progress {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.time-progress-bar {
+  height: 100%;
+  background: var(--accent-gradient);
+  border-radius: 2px;
+  transition: width 0.1s linear;
+  min-width: 0;
+}
+
+.time-progress-bar.playing {
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+}
+
+.time-values {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+}
+
+.time-current {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.time-remaining {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+.time-total {
+  color: var(--text-tertiary);
+}

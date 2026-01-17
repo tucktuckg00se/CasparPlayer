@@ -1,0 +1,99 @@
+.file-tree-item-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  min-height: 32px;
+}
+
+.file-tree-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.file-tree-item.selected {
+  background: rgba(0, 170, 136, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(0, 255, 136, 0.3);
+}
+
+.file-tree-item.folder {
+  font-weight: 500;
+}
+
+.chevron-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform var(--transition);
+}
+
+.chevron-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.file-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.file-icon.folder {
+  color: #f9ca24;
+}
+
+.file-icon.video {
+  color: #00b894;
+}
+
+.file-icon.image {
+  color: #e17055;
+}
+
+.file-icon.audio {
+  color: #6c5ce7;
+}
+
+.file-icon.template {
+  color: #00cec9;
+}
+
+.file-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-duration {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.file-tree-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Drag state */
+.file-tree-item[draggable="true"] {
+  cursor: grab;
+}
+
+.file-tree-item[draggable="true"]:active {
+  cursor: grabbing;
+  opacity: 0.6;
+}

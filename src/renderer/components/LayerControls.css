@@ -1,0 +1,116 @@
+.layer-controls {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.transport-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.control-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+}
+
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.control-btn:active {
+  transform: scale(0.95);
+}
+
+.control-btn-primary {
+  width: 40px;
+  height: 40px;
+  background: var(--accent-gradient);
+  color: var(--bg-primary);
+}
+
+.control-btn-primary:hover {
+  box-shadow: var(--shadow-glow);
+  transform: scale(1.05);
+}
+
+.control-btn-primary:active {
+  transform: scale(0.98);
+}
+
+.mode-controls {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.mode-btn {
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.mode-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.mode-btn.active {
+  background: rgba(0, 170, 136, 0.2);
+  border-color: var(--accent-primary);
+  color: var(--accent-secondary);
+}
+
+.io-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.io-btn {
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.io-btn:hover {
+  background: rgba(0, 170, 136, 0.1);
+  border-color: var(--accent-primary);
+  color: var(--accent-secondary);
+}
+
+.io-btn-clear {
+  color: var(--error);
+  border-color: rgba(255, 68, 68, 0.3);
+}
+
+.io-btn-clear:hover {
+  background: rgba(255, 68, 68, 0.1);
+  border-color: var(--error);
+  color: var(--error-light);
+}

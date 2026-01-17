@@ -1,0 +1,41 @@
+import React from 'react';
+import { useApp } from '../context/AppContext';
+import Channel from './Channel';
+import './ChannelsContainer.css';
+
+export default function ChannelsContainer() {
+  const { state, addChannel } = useApp();
+
+  return (
+    <div className="channels-container">
+      <div className="channels-header">
+        <h2 className="channels-title">Channels</h2>
+        <button className="btn btn-primary" onClick={addChannel}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <line x1="12" y1="5" x2="12" y2="19" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="5" y1="12" x2="19" y2="12" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+          Add Channel
+        </button>
+      </div>
+
+      <div className="channels-grid">
+        {state.channels.length === 0 ? (
+          <div className="empty-state">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" opacity="0.3">
+              <rect x="2" y="3" width="20" height="14" rx="2" strokeWidth="2"/>
+              <line x1="8" y1="21" x2="16" y2="21" strokeWidth="2" strokeLinecap="round"/>
+              <line x1="12" y1="17" x2="12" y2="21" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
+            <h3>No Channels</h3>
+            <p>Click "Add Channel" to create your first channel</p>
+          </div>
+        ) : (
+          state.channels.map(channel => (
+            <Channel key={channel.id} channel={channel} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}

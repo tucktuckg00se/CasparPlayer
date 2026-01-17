@@ -1,0 +1,96 @@
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext';
+import Layer from './Layer';
+import Preview from './Preview';
+import './Channel.css';
+
+export default function Channel({ channel }) {
+  const { deleteChannel, addLayer, toggleExpandChannel } = useApp();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleDelete = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = () => {
+    deleteChannel(channel.id);
+    setShowDeleteConfirm(false);
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteConfirm(false);
+  };
+
+  // Calculate channel width based on layers
+  const baseWidth = 420; // preview + 1 layer
+  const layerWidth = 392; // each additional layer
+  const addButtonWidth = 60;
+  const channelWidth = baseWidth + (Math.max(0, channel.layers.length - 1) * layerWidth) + addButtonWidth;
+
+  return (
+    <div className="channel" style={{ width: `${channelWidth}px` }}>
+      {showDeleteConfirm && (
+        <div className="delete-confirm-overlay">
+          <div className="delete-confirm">
+            <h3>Delete Channel?</h3>
+            <p>Are you sure you want to delete {channel.name}? All layers and playlist items will be removed. This cannot be undone.</p>
+            <div className="delete-confirm-buttons">
+              <button className="btn" onClick={cancelDelete}>Cancel</button>
+              <button className="btn btn-danger" onClick={confirmDelete}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="channel-header">
+        <h3 className="channel-name">{channel.name}</h3>
+        <div className="channel-actions">
+          <button 
+            className="btn-icon" 
+            title="Expand Channel"
+            onClick={() => toggleExpandChannel(channel.id)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+          <button 
+            className="btn-icon btn-danger-icon" 
+            onClick={handleDelete}
+            title="Delete Channel"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <polyline points="3 6 5 6 21 6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="channel-preview">
+        <Preview channelId={channel.id} />
+      </div>
+
+      <div className="channel-layers">
+        {channel.layers.map(layer => (
+          <Layer
+            key={layer.id}
+            layer={layer}
+            channelId={channel.id}
+          />
+        ))}
+
+        <button 
+          className="add-layer-button" 
+          onClick={() => addLayer(channel.id)}
+          title="Add Layer"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <line x1="12" y1="5" x2="12" y2="19" strokeWidth="2" strokeLinecap="round"/>
+            <line x1="5" y1="12" x2="19" y2="12" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
