@@ -1,43 +1,48 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import mpegts from 'mpegts.js';
 import { useApp } from '../context/AppContext';
 import './Preview.css';
 
 export default function Preview({ channelId, expanded = false }) {
   const { connection, settings } = useApp();
   const videoRef = useRef(null);
-  const mediaSourceRef = useRef(null);
-  const sourceBufferRef = useRef(null);
-  const abortControllerRef = useRef(null);
-  const pendingChunksRef = useRef([]);
-  const isAppendingRef = useRef(false);
+  const playerRef = useRef(null);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [streamUrl, setStreamUrl] = useState('');
 
-  // Construct preview URL based on connection settings
-  useEffect(() => {
-    if (connection.isConnected && connection.previewUrl) {
-      const url = connection.previewUrl.replace('{channel}', channelId);
-      setStreamUrl(url);
-    } else if (connection.isConnected) {
-      const previewPort = settings.previewPort || 9250;
-      setStreamUrl(`http://${connection.host}:${previewPort + channelId - 1}`);
-    } else {
-      setStreamUrl('');
+  // Cleanup mpegts.js player
+  const cleanupPlayer = useCallback(() => {
+    console.log(`[Preview ${channelId}] Cleaning up mpegts player`);
+
+    if (playerRef.current) {
+      try {
+        playerRef.current.pause();
+        playerRef.current.unload();
+        playerRef.current.detachMediaElement();
+        playerRef.current.destroy();
+      } catch (err) {
+        console.warn(`[Preview ${channelId}] Error during cleanup:`, err);
+      }
+      playerRef.current = null;
     }
-  }, [connection.isConnected, connection.host, connection.previewUrl, channelId, settings.previewPort]);
+
+    if (videoRef.current) {
+      videoRef.current.src = '';
+      videoRef.current.load();
+    }
+  }, [channelId]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      cleanupMSE();
+      cleanupPlayer();
     };
-  }, []);
+  }, [cleanupPlayer]);
 
-  // Helper to execute raw AMCP command
+  // Execute raw AMCP command
   const executeStreamCommand = async (command) => {
     const ccg = connection.casparCG;
     if (!ccg) throw new Error('Not connected');
@@ -54,325 +59,157 @@ export default function Preview({ channelId, expanded = false }) {
     }
   };
 
-  // Cleanup MSE resources
-  const cleanupMSE = useCallback(() => {
-    // Abort any in-progress fetch
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-    }
-
-    // Clear pending chunks
-    pendingChunksRef.current = [];
-    isAppendingRef.current = false;
-
-    // Clean up source buffer
-    if (sourceBufferRef.current && mediaSourceRef.current) {
-      try {
-        if (mediaSourceRef.current.readyState === 'open') {
-          sourceBufferRef.current.abort();
-        }
-      } catch (e) {
-        console.log('Error aborting source buffer:', e);
-      }
-      sourceBufferRef.current = null;
-    }
-
-    // End media source
-    if (mediaSourceRef.current) {
-      try {
-        if (mediaSourceRef.current.readyState === 'open') {
-          mediaSourceRef.current.endOfStream();
-        }
-      } catch (e) {
-        console.log('Error ending media source:', e);
-      }
-      mediaSourceRef.current = null;
-    }
-
-    // Revoke object URL and clear video
-    if (videoRef.current) {
-      const src = videoRef.current.src;
-      videoRef.current.src = '';
-      if (src && src.startsWith('blob:')) {
-        URL.revokeObjectURL(src);
-      }
-    }
-  }, []);
-
-  // Process pending chunks for source buffer
-  const processPendingChunks = useCallback(() => {
-    if (!sourceBufferRef.current || isAppendingRef.current) return;
-    if (pendingChunksRef.current.length === 0) return;
-
-    const sourceBuffer = sourceBufferRef.current;
-    if (sourceBuffer.updating) return;
-
-    try {
-      isAppendingRef.current = true;
-      const chunk = pendingChunksRef.current.shift();
-      sourceBuffer.appendBuffer(chunk);
-    } catch (e) {
-      console.error('Error appending buffer:', e);
-      isAppendingRef.current = false;
-      // If quota exceeded, remove old data
-      if (e.name === 'QuotaExceededError' && sourceBufferRef.current) {
-        try {
-          const buffered = sourceBufferRef.current.buffered;
-          if (buffered.length > 0) {
-            const removeEnd = buffered.start(0) + 5; // Keep 5 seconds
-            sourceBufferRef.current.remove(0, removeEnd);
-          }
-        } catch (removeErr) {
-          console.error('Error removing buffer:', removeErr);
-        }
-      }
-    }
-  }, []);
-
-  // Start MSE stream consumption
-  const startMSEPlayback = useCallback(async (url) => {
-    if (!('MediaSource' in window)) {
-      setError('MSE not supported in this browser');
-      return false;
-    }
-
-    try {
-      cleanupMSE();
-
-      // Create MediaSource
-      const mediaSource = new MediaSource();
-      mediaSourceRef.current = mediaSource;
-
-      // Create object URL and set as video source
-      const objectUrl = URL.createObjectURL(mediaSource);
-      if (videoRef.current) {
-        videoRef.current.src = objectUrl;
-      }
-
-      // Wait for MediaSource to open
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('MediaSource open timeout')), 10000);
-        mediaSource.addEventListener('sourceopen', () => {
-          clearTimeout(timeout);
-          resolve();
-        }, { once: true });
-        mediaSource.addEventListener('error', (e) => {
-          clearTimeout(timeout);
-          reject(e);
-        }, { once: true });
-      });
-
-      // Add source buffer with fmp4 codecs
-      // Using baseline profile for broad compatibility
-      const mimeType = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
-      if (!MediaSource.isTypeSupported(mimeType)) {
-        throw new Error(`MIME type not supported: ${mimeType}`);
-      }
-
-      const sourceBuffer = mediaSource.addSourceBuffer(mimeType);
-      sourceBufferRef.current = sourceBuffer;
-
-      // Handle source buffer update end
-      sourceBuffer.addEventListener('updateend', () => {
-        isAppendingRef.current = false;
-        processPendingChunks();
-      });
-
-      sourceBuffer.addEventListener('error', (e) => {
-        console.error('SourceBuffer error:', e);
-      });
-
-      // Start fetching the stream
-      abortControllerRef.current = new AbortController();
-
-      const response = await fetch(url, {
-        signal: abortControllerRef.current.signal,
-        headers: {
-          'Accept': 'video/mp4'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const reader = response.body.getReader();
-
-      // Read stream and append to source buffer
-      const readStream = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-
-            if (done) {
-              console.log('Stream ended');
-              if (mediaSourceRef.current && mediaSourceRef.current.readyState === 'open') {
-                // Wait for pending appends before ending
-                const waitForAppends = () => {
-                  if (pendingChunksRef.current.length === 0 && !isAppendingRef.current) {
-                    try {
-                      mediaSourceRef.current.endOfStream();
-                    } catch (e) {}
-                  } else {
-                    setTimeout(waitForAppends, 100);
-                  }
-                };
-                waitForAppends();
-              }
-              break;
-            }
-
-            // Add chunk to pending queue and process
-            pendingChunksRef.current.push(value);
-            processPendingChunks();
-          }
-        } catch (e) {
-          if (e.name !== 'AbortError') {
-            console.error('Stream read error:', e);
-            setError('Stream read error');
-          }
-        }
-      };
-
-      readStream();
-
-      // Start video playback
-      if (videoRef.current) {
-        try {
-          await videoRef.current.play();
-          setIsPlaying(true);
-          setError(null);
-          return true;
-        } catch (playErr) {
-          console.error('Video play failed:', playErr);
-          // Autoplay may be blocked, continue anyway
-          setIsPlaying(true);
-          return true;
-        }
-      }
-
-      return true;
-    } catch (err) {
-      console.error('MSE setup failed:', err);
-      setError(err.message || 'Failed to setup MSE playback');
-      cleanupMSE();
-      return false;
-    }
-  }, [cleanupMSE, processPendingChunks]);
-
-  // Start streaming from CasparCG using ADD STREAM command with fmp4
-  const handleStartStream = async () => {
+  // Connect to stream
+  const handleConnect = async () => {
     if (!connection.casparCG || !connection.isConnected) return;
 
-    try {
-      setError(null);
-      setIsConnecting(true);
+    const { ipcRenderer } = window.require('electron');
+    setIsConnecting(true);
+    setError(null);
 
+    try {
       // Get settings
       const previewPort = settings.previewPort || 9250;
       const actualPort = previewPort + channelId - 1;
+
+      // Start the stream relay server
+      console.log(`[Preview ${channelId}] Starting stream relay on port ${actualPort}`);
+      const relayResult = await ipcRenderer.invoke('stream:startRelay', channelId, actualPort);
+
+      if (!relayResult.success) {
+        throw new Error(relayResult.error || 'Failed to start stream relay');
+      }
+
+      const relayUrl = relayResult.streamUrl;
+      setStreamUrl(relayUrl);
+      console.log(`[Preview ${channelId}] Stream URL: ${relayUrl}`);
+
+      // Build and send the ADD STREAM command to CasparCG with MPEGTS format
+      // Note: CasparCG's ffmpeg consumer ignores most options (ac, ar, preset, tune, etc.)
+      // We use hasAudio:false in mpegts.js since CasparCG sends 16-channel HE-AAC which browsers can't decode
       const scale = settings.previewScale || '384:216';
-      const preset = settings.previewPreset || 'ultrafast';
-      const tune = settings.previewTune || 'zerolatency';
-      const audioBitrate = settings.previewAudioBitrate || '128k';
-      const crf = Math.round(51 - (settings.previewQuality / 100) * 41);
+      const casparUrl = relayUrl.replace('/stream', '/stream.ts');
+      const streamCommand = `ADD ${channelId} STREAM "${casparUrl}" -format mpegts -codec:v libx264 -crf:v 25 -tune:v zerolatency -preset:v ultrafast -filter:v scale=${scale.replace(':', ':')} -filter:a "pan=stereo|c0=FL|c1=FR"`;
 
-      // Build fmp4 streaming command
-      // URL must be quoted separately, ffmpeg args must be outside the quotes
-      const streamCommand = `ADD ${channelId} STREAM "http://127.0.0.1:${actualPort}/stream.mp4" -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof -c:v libx264 -preset ${preset} -tune ${tune} -crf ${crf} -c:a aac -b:a ${audioBitrate} -vf scale=${scale} -af "pan=stereo|c0=FL|c1=FR"`;
-
-      console.log('Sending stream command:', streamCommand);
+      console.log('[Preview] Sending MPEGTS stream command:', streamCommand);
 
       try {
         await executeStreamCommand(streamCommand);
       } catch (cmdErr) {
         console.warn('ADD STREAM command failed:', cmdErr);
-        // Try alternative format for older CasparCG versions
-        const altCommand = `ADD ${channelId} STREAM "http://0.0.0.0:${actualPort}" -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof -c:v libx264 -preset ${preset} -tune ${tune} -crf ${crf} -c:a aac -b:a ${audioBitrate} -vf scale=${scale}`;
-
-        await executeStreamCommand(altCommand);
+        throw new Error('Failed to start CasparCG stream: ' + cmdErr.message);
       }
 
-      setIsStreaming(true);
-      const streamUrl = `http://${connection.host}:${actualPort}/stream.mp4`;
-      setStreamUrl(streamUrl);
+      // Give CasparCG a moment to start streaming
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Give the stream a moment to start
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // Start MSE playback
-      const success = await startMSEPlayback(streamUrl);
-      if (!success) {
-        // Fallback to direct URL playback
-        console.log('MSE failed, trying direct URL playback');
-        handlePlay();
+      // Create mpegts.js player
+      if (!mpegts.isSupported()) {
+        throw new Error('mpegts.js is not supported in this browser');
       }
 
-      setIsConnecting(false);
+      console.log(`[Preview ${channelId}] Creating mpegts.js player`);
+      const player = mpegts.createPlayer({
+        type: 'mpegts',
+        url: relayUrl,
+        isLive: true,
+        hasAudio: false,  // Ignore audio - CasparCG sends 16-channel HE-AAC which browsers can't decode
+      }, {
+        enableWorker: true,
+        liveBufferLatencyChasing: true,
+        liveBufferLatencyMaxLatency: 1.0,
+        liveBufferLatencyMinRemain: 0.2,
+        lazyLoadMaxDuration: 0.5,
+        seekType: 'range',
+      });
+
+      playerRef.current = player;
+
+      // Handle player events
+      player.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
+        console.error(`[Preview ${channelId}] mpegts error:`, errorType, errorDetail, errorInfo);
+        if (errorType === mpegts.ErrorTypes.NETWORK_ERROR) {
+          setError('Network error - stream may have ended');
+        } else if (errorType === mpegts.ErrorTypes.MEDIA_ERROR) {
+          setError('Media error - codec issue');
+        } else {
+          setError(`Playback error: ${errorDetail}`);
+        }
+      });
+
+      player.on(mpegts.Events.LOADING_COMPLETE, () => {
+        console.log(`[Preview ${channelId}] Loading complete`);
+      });
+
+      player.on(mpegts.Events.METADATA_ARRIVED, (metadata) => {
+        console.log(`[Preview ${channelId}] Metadata arrived:`, metadata);
+      });
+
+      // Attach to video element and start playback
+      player.attachMediaElement(videoRef.current);
+      player.load();
+
+      // Start playing
+      try {
+        await player.play();
+        console.log(`[Preview ${channelId}] Playback started`);
+        setIsConnected(true);
+        setIsConnecting(false);
+      } catch (playErr) {
+        console.warn(`[Preview ${channelId}] Autoplay failed, trying muted:`, playErr);
+        videoRef.current.muted = true;
+        await player.play();
+        setIsConnected(true);
+        setIsConnecting(false);
+      }
+
     } catch (err) {
-      console.error('Failed to start stream:', err);
-      setError('Failed to start CasparCG stream. Check server configuration.');
-      setIsStreaming(false);
+      console.error('Failed to connect:', err);
+      setError(err.message || 'Failed to connect');
       setIsConnecting(false);
+
+      // Cleanup on error
+      cleanupPlayer();
+      await ipcRenderer.invoke('stream:stopRelay', channelId);
     }
   };
 
-  // Stop streaming from CasparCG
-  const handleStopStream = async () => {
+  // Disconnect from stream
+  const handleDisconnect = async () => {
+    const { ipcRenderer } = window.require('electron');
+
     try {
-      cleanupMSE();
-
-      if (connection.casparCG && connection.isConnected && isStreaming) {
-        const previewPort = settings.previewPort || 9250;
-        const actualPort = previewPort + channelId - 1;
-
-        // Try to remove the stream
+      // Remove the stream consumer from CasparCG
+      if (connection.casparCG && connection.isConnected && streamUrl) {
         try {
-          await executeStreamCommand(`REMOVE ${channelId} STREAM "http://127.0.0.1:${actualPort}/stream.mp4"`);
+          const casparUrl = streamUrl.replace('/stream', '/stream.ts');
+          await executeStreamCommand(`REMOVE ${channelId} STREAM "${casparUrl}"`);
         } catch (e) {
           console.log('Remove stream command failed (may be expected):', e);
         }
-        try {
-          await executeStreamCommand(`REMOVE ${channelId} STREAM "http://0.0.0.0:${actualPort}"`);
-        } catch (e) {}
       }
 
-      setIsPlaying(false);
-      setIsStreaming(false);
-      setError(null);
+      // Cleanup player
+      cleanupPlayer();
+
+      // Stop the stream relay
+      await ipcRenderer.invoke('stream:stopRelay', channelId);
+
     } catch (err) {
-      console.error('Failed to stop stream:', err);
-      setIsStreaming(false);
-      setIsPlaying(false);
+      console.error('Error disconnecting:', err);
     }
+
+    setIsConnected(false);
+    setStreamUrl('');
+    setError(null);
+    setIsConnecting(false);
   };
 
-  // Direct URL playback (fallback)
-  const handlePlay = () => {
-    if (videoRef.current && streamUrl) {
-      videoRef.current.src = streamUrl;
-      videoRef.current.play()
-        .then(() => {
-          setIsPlaying(true);
-          setError(null);
-        })
-        .catch(err => {
-          console.error('Failed to play preview:', err);
-          setError('Failed to load preview stream');
-          setIsPlaying(false);
-        });
+  // Handle video error
+  const handleVideoError = () => {
+    if (isConnected) {
+      setError('Stream playback error');
     }
-  };
-
-  const handleStop = () => {
-    cleanupMSE();
-    setIsPlaying(false);
-  };
-
-  const handleError = () => {
-    setError('Stream unavailable');
-    setIsPlaying(false);
   };
 
   if (!connection.isConnected) {
@@ -383,7 +220,7 @@ export default function Preview({ channelId, expanded = false }) {
             <rect x="2" y="7" width="20" height="15" rx="2" ry="2" strokeWidth="2"/>
             <polyline points="17 2 12 7 7 2" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          <p>Not connected</p>
+          <p>Not connected to CasparCG</p>
         </div>
       </div>
     );
@@ -397,11 +234,11 @@ export default function Preview({ channelId, expanded = false }) {
         autoPlay
         muted
         playsInline
-        onError={handleError}
-        style={{ display: isPlaying ? 'block' : 'none' }}
+        onError={handleVideoError}
+        style={{ display: isConnected ? 'block' : 'none' }}
       />
 
-      {!isPlaying && (
+      {!isConnected && (
         <div className="preview-placeholder">
           {isConnecting ? (
             <>
@@ -418,7 +255,7 @@ export default function Preview({ channelId, expanded = false }) {
                 <line x1="9" y1="9" x2="15" y2="15" strokeWidth="2" strokeLinecap="round"/>
               </svg>
               <p>{error}</p>
-              <button className="btn btn-primary btn-sm" onClick={handleStartStream}>
+              <button className="btn btn-primary btn-sm" onClick={handleConnect}>
                 Retry
               </button>
             </>
@@ -430,18 +267,12 @@ export default function Preview({ channelId, expanded = false }) {
               </svg>
               <p>Channel {channelId} Preview</p>
               <div className="preview-buttons">
-                <button className="btn btn-primary btn-sm" onClick={handleStartStream}>
+                <button className="btn btn-primary btn-sm" onClick={handleConnect}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10"/>
                     <circle cx="12" cy="12" r="3"/>
                   </svg>
                   Connect
-                </button>
-                <button className="btn btn-sm" onClick={handlePlay} title="Load from URL directly">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M8 5v14l11-7z"/>
-                  </svg>
-                  URL
                 </button>
               </div>
             </>
@@ -449,12 +280,12 @@ export default function Preview({ channelId, expanded = false }) {
         </div>
       )}
 
-      {isPlaying && (
+      {isConnected && (
         <div className="preview-controls">
           <button
             className="btn-icon btn-sm"
-            onClick={isStreaming ? handleStopStream : handleStop}
-            title={isStreaming ? 'Disconnect Stream' : 'Stop Preview'}
+            onClick={handleDisconnect}
+            title="Disconnect"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <rect x="6" y="6" width="12" height="12"/>
@@ -462,7 +293,7 @@ export default function Preview({ channelId, expanded = false }) {
           </button>
           <span className="preview-label">
             Channel {channelId}
-            {isStreaming && <span className="streaming-badge">LIVE</span>}
+            <span className="streaming-badge">LIVE</span>
           </span>
         </div>
       )}

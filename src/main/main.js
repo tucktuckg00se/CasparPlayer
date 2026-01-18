@@ -4,6 +4,7 @@ const fs = require('fs');
 const mediaScanner = require('./mediaScanner');
 const thumbnailGenerator = require('./thumbnailGenerator');
 const oscService = require('./oscService');
+const streamRelay = require('./streamRelay');
 
 let mainWindow;
 let mediaWatcher = null;
@@ -420,4 +421,51 @@ ipcMain.handle('rundown:delete', async (event, name) => {
     console.error('Error deleting rundown:', error);
     return { success: false, error: error.message };
   }
+});
+
+// Stream Relay management for MPEGTS live preview
+ipcMain.handle('stream:startRelay', async (event, channelId, port) => {
+  try {
+    const result = await streamRelay.startRelay(
+      channelId,
+      port,
+      // onStreamStarted
+      (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log(`[Main] Stream started for channel ${channelId}`);
+          mainWindow.webContents.send('stream:started', data);
+        }
+      },
+      // onStreamEnded
+      (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log(`[Main] Stream ended for channel ${channelId}`);
+          mainWindow.webContents.send('stream:ended', data);
+        }
+      }
+    );
+    return result;
+  } catch (error) {
+    console.error('Error starting stream relay:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('stream:stopRelay', async (event, channelId) => {
+  try {
+    await streamRelay.stopRelay(channelId);
+    return { success: true };
+  } catch (error) {
+    console.error('Error stopping stream relay:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('stream:getRelayStatus', async (event, channelId) => {
+  return streamRelay.getRelayStatus(channelId);
+});
+
+// Cleanup stream relays on app quit
+app.on('will-quit', async () => {
+  await streamRelay.stopAllRelays();
 });
