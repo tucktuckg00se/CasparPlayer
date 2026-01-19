@@ -81,7 +81,16 @@ export default function Channel({ channel, isExpanded = false, isHidden = false 
       {/* Only show header in normal mode - expanded mode uses container header */}
       {!isExpanded && (
         <div className="channel-header">
-          <h3 className="channel-name">{channel.name}</h3>
+          <div className="channel-header-info">
+            <h3 className="channel-name">{channel.name}</h3>
+            {(channel.channelResolution || channel.channelFrameRate) && (
+              <span className="channel-format">
+                {channel.channelResolution}
+                {channel.channelResolution && channel.channelFrameRate && ' / '}
+                {channel.channelFrameRate && `${channel.channelFrameRate}fps`}
+              </span>
+            )}
+          </div>
           <div className="channel-actions">
             <button
               className="btn-icon"

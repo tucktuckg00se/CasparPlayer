@@ -385,34 +385,62 @@ export async function info(casparCG, channel = null, layer = null) {
   }
 }
 
-// Parse frame rate from INFO channel response
-export function parseChannelFrameRate(infoData) {
+// Parse frame rate from format string like "720p5000" or "1080i2997"
+function parseFrameRateFromFormat(format) {
+  if (!format) return null;
+  const match = format.match(/(\d{4})$/);
+  if (match) {
+    return parseInt(match[1], 10) / 100; // 5000 -> 50, 2997 -> 29.97
+  }
+  if (format.toUpperCase().includes('PAL')) return 25;
+  if (format.toUpperCase().includes('NTSC')) return 29.97;
+  return null;
+}
+
+// Parse resolution from format string like "720p5000" or "1080i5000"
+function parseResolutionFromFormat(format) {
+  if (!format) return null;
+  const match = format.match(/^(\d+)([pi])/i);
+  if (match) return `${match[1]}${match[2].toLowerCase()}`;
+  if (format.toUpperCase().includes('PAL')) return '576i';
+  if (format.toUpperCase().includes('NTSC')) return '480i';
+  return format;
+}
+
+// Parse channel info from INFO response (handles array or object)
+export function parseChannelInfo(infoData, channelId = null) {
   if (!infoData) return null;
 
-  // INFO returns XML-like data or parsed object depending on library version
-  // Try to extract frame rate from common formats
-  if (typeof infoData === 'string') {
-    // Try to parse frame rate from XML string
-    const fpsMatch = infoData.match(/frame-rate[">]\s*([\d.]+)/i);
-    if (fpsMatch) {
-      return parseFloat(fpsMatch[1]);
+  // Handle array response (e.g., from INFO without channel param)
+  if (Array.isArray(infoData)) {
+    const entry = channelId !== null
+      ? infoData.find(e => e.channel === channelId)
+      : infoData[0];
+    if (entry) {
+      return {
+        frameRate: entry.frameRate || parseFrameRateFromFormat(entry.format),
+        resolution: parseResolutionFromFormat(entry.format),
+        format: entry.format
+      };
     }
-    // Try framerate attribute
-    const frMatch = infoData.match(/framerate[=">\s]+([\d.]+)/i);
-    if (frMatch) {
-      return parseFloat(frMatch[1]);
-    }
-  } else if (typeof infoData === 'object') {
-    // Check common property names
-    if (infoData.frameRate) return infoData.frameRate;
-    if (infoData.framerate) return infoData.framerate;
-    if (infoData['frame-rate']) return infoData['frame-rate'];
-    // Check nested structures
-    if (infoData.channel?.frameRate) return infoData.channel.frameRate;
-    if (infoData.format?.frameRate) return infoData.format.frameRate;
+    return null;
+  }
+
+  // Handle single object response
+  if (typeof infoData === 'object') {
+    return {
+      frameRate: infoData.frameRate || infoData.framerate || parseFrameRateFromFormat(infoData.format),
+      resolution: parseResolutionFromFormat(infoData.format),
+      format: infoData.format
+    };
   }
 
   return null;
+}
+
+// Backward compatible wrapper - parse frame rate from INFO channel response
+export function parseChannelFrameRate(infoData, channelId = null) {
+  return parseChannelInfo(infoData, channelId)?.frameRate || null;
 }
 
 export default {
@@ -432,5 +460,6 @@ export default {
   thumbnailRetrieve,
   thumbnailGenerate,
   info,
-  parseChannelFrameRate
+  parseChannelFrameRate,
+  parseChannelInfo
 };

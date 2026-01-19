@@ -17,6 +17,13 @@
   color: var(--text-primary);
 }
 
+.channel-format-inline {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  margin-left: 12px;
+}
+
 .channels-grid {
   display: flex;
   gap: 20px;

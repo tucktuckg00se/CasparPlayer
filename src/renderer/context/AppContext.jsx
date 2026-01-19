@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { CasparCG } from 'casparcg-connection';
 import { v4 as uuidv4 } from 'uuid';
-import casparCommands, { cls, thumbnailRetrieve, info, parseChannelFrameRate } from '../services/casparCommands';
+import casparCommands, { cls, thumbnailRetrieve, info, parseChannelInfo } from '../services/casparCommands';
 import { processOscMessage } from '../services/oscHandler';
 import { executeMacro as runMacro } from '../services/macroExecutor';
 import { convertClipInfoToMetadata, localPathToCasparClip, findCasparMetadata } from '../services/casparMediaService';
@@ -834,27 +834,26 @@ export function AppProvider({ children }) {
           console.warn('Auto-refresh CasparCG media failed:', error);
         }
 
-        // Fetch channel frame rates for all existing channels
+        // Fetch channel info (frame rate, resolution) for all existing channels
         try {
           const currentChannels = stateRef.current.channels;
+          const infoData = await info(ccg);  // Get all channels at once
+
           for (const channel of currentChannels) {
-            const infoData = await info(ccg, channel.id);
-            const frameRate = parseChannelFrameRate(infoData);
-            if (frameRate) {
-              console.log(`Channel ${channel.id} frame rate: ${frameRate}`);
+            const channelInfo = parseChannelInfo(infoData, channel.id);
+            if (channelInfo) {
+              console.log(`Channel ${channel.id}: ${channelInfo.resolution} @ ${channelInfo.frameRate}fps`);
               setState(prev => ({
                 ...prev,
-                channels: prev.channels.map(ch => {
-                  if (ch.id === channel.id) {
-                    return { ...ch, channelFrameRate: frameRate };
-                  }
-                  return ch;
-                })
+                channels: prev.channels.map(ch => ch.id === channel.id
+                  ? { ...ch, channelFrameRate: channelInfo.frameRate, channelResolution: channelInfo.resolution }
+                  : ch
+                )
               }));
             }
           }
         } catch (error) {
-          console.warn('Failed to fetch channel frame rates:', error);
+          console.warn('Failed to fetch channel info:', error);
         }
       }, 500);
 
@@ -890,7 +889,7 @@ export function AppProvider({ children }) {
   }, [connection.casparCG]);
 
   // Channel Management
-  const addChannel = useCallback(() => {
+  const addChannel = useCallback(async () => {
     const newChannelId = state.channels.length + 1;
     const newChannel = {
       id: newChannelId,
@@ -906,7 +905,27 @@ export function AppProvider({ children }) {
       autoConnectTrigger: settings.autoConnectPreviews ? (prev.autoConnectTrigger || 0) + 1 : prev.autoConnectTrigger,
       autoConnectChannelId: settings.autoConnectPreviews ? newChannelId : null
     }));
-  }, [state.channels, settings.autoConnectPreviews]);
+
+    // Fetch channel info if connected to CasparCG
+    if (connection.casparCG && connection.isConnected) {
+      try {
+        const infoData = await info(connection.casparCG);
+        const channelInfo = parseChannelInfo(infoData, newChannelId);
+        if (channelInfo) {
+          console.log(`Channel ${newChannelId}: ${channelInfo.resolution} @ ${channelInfo.frameRate}fps`);
+          setState(prev => ({
+            ...prev,
+            channels: prev.channels.map(ch => ch.id === newChannelId
+              ? { ...ch, channelFrameRate: channelInfo.frameRate, channelResolution: channelInfo.resolution }
+              : ch
+            )
+          }));
+        }
+      } catch (error) {
+        console.warn(`Failed to fetch info for channel ${newChannelId}:`, error);
+      }
+    }
+  }, [state.channels, settings.autoConnectPreviews, connection.casparCG, connection.isConnected]);
 
   const deleteChannel = useCallback((channelId) => {
     setState(prev => ({
@@ -946,28 +965,26 @@ export function AppProvider({ children }) {
     deletedItems: []        // Undo stack for deleted items
   });
 
-  // Fetch channel frame rate from CasparCG INFO command
+  // Fetch channel info (frame rate, resolution) from CasparCG INFO command
   const fetchChannelFrameRate = useCallback(async (channelId, ccg = null) => {
     const casparCG = ccg || connection.casparCG;
     if (!casparCG) return;
 
     try {
       const infoData = await info(casparCG, channelId);
-      const frameRate = parseChannelFrameRate(infoData);
+      const channelInfo = parseChannelInfo(infoData, channelId);
 
-      if (frameRate) {
+      if (channelInfo) {
         setState(prev => ({
           ...prev,
-          channels: prev.channels.map(ch => {
-            if (ch.id === channelId) {
-              return { ...ch, channelFrameRate: frameRate };
-            }
-            return ch;
-          })
+          channels: prev.channels.map(ch => ch.id === channelId
+            ? { ...ch, channelFrameRate: channelInfo.frameRate, channelResolution: channelInfo.resolution }
+            : ch
+          )
         }));
       }
     } catch (error) {
-      console.warn(`Failed to fetch frame rate for channel ${channelId}:`, error);
+      console.warn(`Failed to fetch info for channel ${channelId}:`, error);
     }
   }, [connection.casparCG]);
 
@@ -2271,10 +2288,33 @@ export function AppProvider({ children }) {
         autoConnectTrigger: settings.autoConnectPreviews ? (prev.autoConnectTrigger || 0) + 1 : prev.autoConnectTrigger,
         autoConnectChannelId: settings.autoConnectPreviews ? 'all' : null
       }));
+
+      // Fetch channel info for all loaded channels if connected to CasparCG
+      if (connection.casparCG && connection.isConnected) {
+        try {
+          const infoData = await info(connection.casparCG);
+          for (const channel of channelsWithState) {
+            const channelInfo = parseChannelInfo(infoData, channel.id);
+            if (channelInfo) {
+              console.log(`Channel ${channel.id}: ${channelInfo.resolution} @ ${channelInfo.frameRate}fps`);
+              setState(prev => ({
+                ...prev,
+                channels: prev.channels.map(ch => ch.id === channel.id
+                  ? { ...ch, channelFrameRate: channelInfo.frameRate, channelResolution: channelInfo.resolution }
+                  : ch
+                )
+              }));
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to fetch channel info:', error);
+        }
+      }
+
       return { success: true };
     }
     return result;
-  }, [settings.autoConnectPreviews]);
+  }, [settings.autoConnectPreviews, connection.casparCG, connection.isConnected]);
 
   const deleteRundown = useCallback(async (name) => {
     const { ipcRenderer } = window.require('electron');

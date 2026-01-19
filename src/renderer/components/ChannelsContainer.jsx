@@ -25,6 +25,14 @@ export default function ChannelsContainer() {
             </button>
             <h2 className="channels-title">
               {state.channels.find(ch => ch.id === expandedChannelId)?.name || 'Channel'}
+              {(() => {
+                const ch = state.channels.find(c => c.id === expandedChannelId);
+                return (ch?.channelResolution || ch?.channelFrameRate)
+                  ? <span className="channel-format-inline">
+                      {ch.channelResolution}{ch.channelResolution && ch.channelFrameRate && ' / '}{ch.channelFrameRate && `${ch.channelFrameRate}fps`}
+                    </span>
+                  : null;
+              })()}
             </h2>
             <button className="btn btn-primary" onClick={() => addLayer(expandedChannelId)}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
