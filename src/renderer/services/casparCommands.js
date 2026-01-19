@@ -301,6 +301,120 @@ export async function executeRawCommand(casparCG, commandString) {
   }
 }
 
+// CLS - List media files with metadata
+export async function cls(casparCG, subDirectory = null) {
+  if (!casparCG) {
+    throw new Error('Not connected to CasparCG');
+  }
+
+  try {
+    const params = subDirectory ? { subDirectory } : {};
+    const result = await casparCG.cls(params);
+    if (result?.request) {
+      const response = await result.request;
+      return response.data || [];
+    }
+    return [];
+  } catch (error) {
+    console.error('CLS command failed:', error);
+    throw error;
+  }
+}
+
+// THUMBNAIL RETRIEVE - Get thumbnail as base64 PNG
+export async function thumbnailRetrieve(casparCG, filename) {
+  if (!casparCG) {
+    throw new Error('Not connected to CasparCG');
+  }
+
+  try {
+    const result = await casparCG.thumbnailRetrieve({ filename });
+    if (result?.request) {
+      const response = await result.request;
+      return response.data || null;
+    }
+    return null;
+  } catch (error) {
+    console.error('Thumbnail retrieve failed:', error);
+    throw error;
+  }
+}
+
+// THUMBNAIL GENERATE - Trigger thumbnail creation
+export async function thumbnailGenerate(casparCG, filename) {
+  if (!casparCG) {
+    throw new Error('Not connected to CasparCG');
+  }
+
+  try {
+    const result = await casparCG.thumbnailGenerate({ filename });
+    if (result?.request) {
+      await result.request;
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Thumbnail generate failed:', error);
+    throw error;
+  }
+}
+
+// INFO - Get channel/layer information including frame rate
+export async function info(casparCG, channel = null, layer = null) {
+  if (!casparCG) {
+    throw new Error('Not connected to CasparCG');
+  }
+
+  try {
+    const params = {};
+    if (channel !== null) {
+      params.channel = channel;
+    }
+    if (layer !== null) {
+      params.layer = layer;
+    }
+    const result = await casparCG.info(params);
+    if (result?.request) {
+      const response = await result.request;
+      return response.data || null;
+    }
+    return null;
+  } catch (error) {
+    console.error('INFO command failed:', error);
+    throw error;
+  }
+}
+
+// Parse frame rate from INFO channel response
+export function parseChannelFrameRate(infoData) {
+  if (!infoData) return null;
+
+  // INFO returns XML-like data or parsed object depending on library version
+  // Try to extract frame rate from common formats
+  if (typeof infoData === 'string') {
+    // Try to parse frame rate from XML string
+    const fpsMatch = infoData.match(/frame-rate[">]\s*([\d.]+)/i);
+    if (fpsMatch) {
+      return parseFloat(fpsMatch[1]);
+    }
+    // Try framerate attribute
+    const frMatch = infoData.match(/framerate[=">\s]+([\d.]+)/i);
+    if (frMatch) {
+      return parseFloat(frMatch[1]);
+    }
+  } else if (typeof infoData === 'object') {
+    // Check common property names
+    if (infoData.frameRate) return infoData.frameRate;
+    if (infoData.framerate) return infoData.framerate;
+    if (infoData['frame-rate']) return infoData['frame-rate'];
+    // Check nested structures
+    if (infoData.channel?.frameRate) return infoData.channel.frameRate;
+    if (infoData.format?.frameRate) return infoData.format.frameRate;
+  }
+
+  return null;
+}
+
 export default {
   play,
   loadBg,
@@ -313,5 +427,10 @@ export default {
   cgPlay,
   cgStop,
   cgUpdate,
-  executeRawCommand
+  executeRawCommand,
+  cls,
+  thumbnailRetrieve,
+  thumbnailGenerate,
+  info,
+  parseChannelFrameRate
 };

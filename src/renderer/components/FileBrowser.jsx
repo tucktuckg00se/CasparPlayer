@@ -1,13 +1,41 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import FileTree from './FileTree';
 import MediaPreview from './MediaPreview';
 import './FileBrowser.css';
 
 export default function FileBrowser() {
-  const { state, settings, setMediaRoot, selectMediaFile, toggleFolderExpand } = useApp();
+  const { state, connection, settings, setMediaRoot, selectMediaFile, toggleFolderExpand, refreshCasparMedia } = useApp();
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
+  const [previewHeight, setPreviewHeight] = useState(250);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartY = useRef(0);
+  const resizeStartHeight = useRef(0);
+
+  // Handle resize drag
+  const handleResizeStart = useCallback((e) => {
+    e.preventDefault();
+    setIsResizing(true);
+    resizeStartY.current = e.clientY;
+    resizeStartHeight.current = previewHeight;
+
+    const handleMouseMove = (moveEvent) => {
+      // Dragging up increases height (negative delta = larger preview)
+      const deltaY = resizeStartY.current - moveEvent.clientY;
+      const newHeight = Math.max(150, Math.min(500, resizeStartHeight.current + deltaY));
+      setPreviewHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [previewHeight]);
 
   // Note: Initial media folder loading is handled by loadConfig() in AppContext
   // This avoids race conditions between duplicate loading mechanisms
@@ -71,6 +99,10 @@ export default function FileBrowser() {
   const handleRefresh = () => {
     if (state.media.rootPath) {
       scanFolder(state.media.rootPath);
+    }
+    // Also refresh CasparCG media list if connected
+    if (connection.isConnected) {
+      refreshCasparMedia();
     }
   };
 
@@ -180,8 +212,17 @@ export default function FileBrowser() {
         )}
       </div>
 
-      <div className="file-browser-preview">
-        <MediaPreview file={state.media.selectedFile} />
+      <div className="file-browser-preview" style={{ height: `${previewHeight}px` }}>
+        <div
+          className={`preview-resize-handle ${isResizing ? 'resizing' : ''}`}
+          onMouseDown={handleResizeStart}
+          title="Drag to resize preview"
+        >
+          <div className="resize-handle-bar" />
+        </div>
+        <div className="file-browser-preview-content">
+          <MediaPreview file={state.media.selectedFile} />
+        </div>
       </div>
     </div>
   );

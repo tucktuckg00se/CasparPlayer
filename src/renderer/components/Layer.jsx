@@ -5,7 +5,7 @@ import LayerControls from './LayerControls';
 import TimeDisplay from './TimeDisplay';
 import './Layer.css';
 
-export default function Layer({ layer, channelId, expanded = false }) {
+export default function Layer({ layer, channelId, channelFrameRate, expanded = false }) {
   const { state, deleteLayer } = useApp();
 
   const handleDeleteLayer = () => {
@@ -66,6 +66,7 @@ export default function Layer({ layer, channelId, expanded = false }) {
         currentIndex={layer.currentIndex}
         channelId={channelId}
         layerId={layer.id}
+        channelFrameRate={channelFrameRate}
         expanded={expanded}
         selectedItems={layer.selectedItems || []}
         lastSelectedIndex={layer.lastSelectedIndex}

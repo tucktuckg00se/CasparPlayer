@@ -128,6 +128,7 @@ export default function Channel({ channel, isExpanded = false, isHidden = false 
             key={layer.id}
             layer={layer}
             channelId={channel.id}
+            channelFrameRate={channel.channelFrameRate}
             expanded={isExpanded}
           />
         ))}

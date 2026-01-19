@@ -4,7 +4,7 @@ import { DRAG_TYPES, parseDragData } from './DragDropProvider';
 import PlaylistItem from './PlaylistItem';
 import './Playlist.css';
 
-export default function Playlist({ items, currentIndex, channelId, layerId, expanded = false, selectedItems = [], lastSelectedIndex = null, isLayerPlaying = false }) {
+export default function Playlist({ items, currentIndex, channelId, layerId, channelFrameRate, expanded = false, selectedItems = [], lastSelectedIndex = null, isLayerPlaying = false }) {
   const { addMediaToPlaylist, reorderPlaylistItems, selectPlaylistItems, deleteSelectedItems, undoDelete } = useApp();
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [lastClickIndex, setLastClickIndex] = useState(null);
@@ -169,6 +169,7 @@ export default function Playlist({ items, currentIndex, channelId, layerId, expa
               isSelected={selectedItems.includes(item.id)}
               channelId={channelId}
               layerId={layerId}
+              channelFrameRate={channelFrameRate}
               onItemClick={(e) => handleItemClick(item.id, index, e)}
             />
           </div>

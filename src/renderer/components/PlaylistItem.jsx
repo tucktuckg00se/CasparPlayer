@@ -5,6 +5,8 @@ import { formatDuration, framesToTimecode } from '../utils/timecode';
 import TimecodeInput from './TimecodeInput';
 import './PlaylistItem.css';
 
+const { ipcRenderer } = window.require('electron');
+
 export default function PlaylistItem({
   item,
   index,
@@ -13,25 +15,51 @@ export default function PlaylistItem({
   isSelected,
   channelId,
   layerId,
+  channelFrameRate,
   onItemClick
 }) {
-  const { removePlaylistItem, playItem, updateItemDuration, updateItemInOutPoints } = useApp();
+  const { removePlaylistItem, playItem, updateItemDuration, updateItemInOutPoints, updateItemMetadata } = useApp();
   const isMacro = item.type === 'macro';
   const isImage = item.type === 'image';
   const isVideo = item.type === 'video';
-  const [editingDuration, setEditingDuration] = useState(false);
-  const [durationValue, setDurationValue] = useState(item.duration.toString());
+  const [showDurationEditor, setShowDurationEditor] = useState(false);
   const [showInOutEditor, setShowInOutEditor] = useState(false);
   const [inPointFrames, setInPointFrames] = useState(item.inPointFrames ?? null);
   const [outPointFrames, setOutPointFrames] = useState(item.outPointFrames ?? null);
   const frameRate = item.frameRate ?? 25;
   const maxFrames = item.duration > 0 ? Math.floor(item.duration * frameRate) : null;
 
+  // For images, use channel frame rate for duration calculation
+  const imageFrameRate = channelFrameRate || 25;
+  // Convert image duration (seconds) to frames for the timecode editor
+  const imageDurationFrames = isImage && item.duration > 0
+    ? Math.round(item.duration * imageFrameRate)
+    : null;
+  const [localImageDurationFrames, setLocalImageDurationFrames] = useState(imageDurationFrames);
+
+  // Calculate effective duration (considering in/out points for videos)
+  const getEffectiveDuration = () => {
+    if (isVideo && (item.inPointFrames !== null || item.outPointFrames !== null)) {
+      const inFrames = item.inPointFrames || 0;
+      const outFrames = item.outPointFrames !== null ? item.outPointFrames : (item.duration * frameRate);
+      return (outFrames - inFrames) / frameRate;
+    }
+    return item.duration;
+  };
+  const effectiveDuration = getEffectiveDuration();
+
   // Sync local state when item prop changes
   useEffect(() => {
     setInPointFrames(item.inPointFrames ?? null);
     setOutPointFrames(item.outPointFrames ?? null);
   }, [item.inPointFrames, item.outPointFrames]);
+
+  // Sync image duration frames when item.duration or channel frame rate changes
+  useEffect(() => {
+    if (isImage && item.duration > 0) {
+      setLocalImageDurationFrames(Math.round(item.duration * imageFrameRate));
+    }
+  }, [item.duration, imageFrameRate, isImage]);
 
   const handleClick = (e) => {
     if (onItemClick) {
@@ -65,30 +93,37 @@ export default function PlaylistItem({
   const handleDurationClick = (e) => {
     if (isImage) {
       e.stopPropagation();
-      setDurationValue(item.duration.toString());
-      setEditingDuration(true);
+      setShowDurationEditor(!showDurationEditor);
     }
   };
 
-  const handleDurationChange = (e) => {
-    setDurationValue(e.target.value);
+  // Handle image duration change from TimecodeInput (receives frames)
+  const handleImageDurationFramesChange = (frames) => {
+    setLocalImageDurationFrames(frames);
+    if (frames !== null && frames > 0) {
+      // Convert frames to seconds using channel frame rate
+      const seconds = frames / imageFrameRate;
+      updateItemDuration(channelId, layerId, item.id, seconds);
+    }
   };
 
-  const handleDurationBlur = () => {
-    const newDuration = parseFloat(durationValue) || 0;
-    if (newDuration !== item.duration) {
-      updateItemDuration(channelId, layerId, item.id, newDuration);
-    }
-    setEditingDuration(false);
-  };
+  // Handle in/out editor click - verify metadata first if needed
+  const handleInOutClick = async (e) => {
+    e.stopPropagation();
 
-  const handleDurationKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      handleDurationBlur();
-    } else if (e.key === 'Escape') {
-      setDurationValue(item.duration.toString());
-      setEditingDuration(false);
+    // If frameRate is default (25) and not verified, try to fetch actual metadata
+    if (isVideo && item.frameRate === 25 && !item.metadataVerified) {
+      try {
+        const metadata = await ipcRenderer.invoke('media:getMetadata', item.path, 'video');
+        if (metadata?.frameRate) {
+          updateItemMetadata(channelId, layerId, item.id, metadata);
+        }
+      } catch (err) {
+        console.warn('Failed to verify video metadata:', err);
+      }
     }
+
+    setShowInOutEditor(!showInOutEditor);
   };
 
   return (
@@ -119,55 +154,44 @@ export default function PlaylistItem({
         {item.inPointFrames !== null || item.outPointFrames !== null ? (
           <span
             className="item-io"
-            title={`In: ${item.inPointFrames !== null ? framesToTimecode(item.inPointFrames, frameRate) : '-'} / Out: ${item.outPointFrames !== null ? framesToTimecode(item.outPointFrames, frameRate) : '-'}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowInOutEditor(!showInOutEditor);
-            }}
+            title={`In: ${item.inPointFrames !== null ? framesToTimecode(item.inPointFrames, frameRate) : '-'} / Out: ${item.outPointFrames !== null ? framesToTimecode(item.outPointFrames, frameRate) : '-'}${frameRate !== 25 ? ` @ ${frameRate.toFixed(2)}fps` : ''}`}
+            onClick={handleInOutClick}
           >
             IO
           </span>
         ) : isVideo ? (
           <span
             className="item-io-add"
-            title="Click to set In/Out points (HH:MM:SS:FF)"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowInOutEditor(!showInOutEditor);
-            }}
+            title={`Click to set In/Out points (HH:MM:SS:FF)${frameRate !== 25 ? ` @ ${frameRate.toFixed(2)}fps` : ''}`}
+            onClick={handleInOutClick}
           >
             +IO
           </span>
         ) : null}
-        {isImage && editingDuration ? (
-          <input
-            type="number"
-            className="duration-input"
-            value={durationValue}
-            onChange={handleDurationChange}
-            onBlur={handleDurationBlur}
-            onKeyDown={handleDurationKeyDown}
-            autoFocus
-            min="0"
-            step="0.5"
-            onClick={e => e.stopPropagation()}
-          />
-        ) : item.duration > 0 ? (
+        {effectiveDuration > 0 ? (
           <span
             className={isImage ? 'duration-editable' : 'duration-display'}
             onClick={handleDurationClick}
-            title={isImage ? 'Click to edit duration' : `Duration: ${formatDuration(item.duration)}`}
+            title={isImage ? 'Click to edit duration' : `Duration: ${formatDuration(effectiveDuration)}${isVideo && effectiveDuration !== item.duration ? ` (full: ${formatDuration(item.duration)})` : ''}`}
           >
-            {formatDuration(item.duration)}
+            {formatDuration(effectiveDuration)}
           </span>
         ) : (
-          <span className="duration-display duration-unknown">--:--</span>
+          <span
+            className={isImage ? 'duration-editable duration-unknown' : 'duration-display duration-unknown'}
+            onClick={handleDurationClick}
+          >
+            --:--
+          </span>
         )}
       </div>
 
       {/* In/Out Point Editor with Timecode inputs */}
       {showInOutEditor && isVideo && (
         <div className="item-io-editor" onClick={e => e.stopPropagation()}>
+          <div className="io-fps-display">
+            {frameRate.toFixed(2)} fps
+          </div>
           <div className="io-row">
             <label>In:</label>
             <TimecodeInput
@@ -208,6 +232,44 @@ export default function PlaylistItem({
               className="io-done-btn"
               title="Close editor"
               onClick={() => setShowInOutEditor(false)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Image Duration Editor */}
+      {showDurationEditor && isImage && (
+        <div className="item-io-editor" onClick={e => e.stopPropagation()}>
+          <div className="io-fps-display">
+            {imageFrameRate.toFixed(2)} fps (channel)
+          </div>
+          <div className="io-row">
+            <label>Dur:</label>
+            <TimecodeInput
+              value={localImageDurationFrames}
+              onChange={handleImageDurationFramesChange}
+              frameRate={imageFrameRate}
+              maxFrames={null}
+            />
+          </div>
+          <div className="io-row io-actions">
+            <button
+              className="io-clear-btn"
+              title="Reset to default (5 sec)"
+              onClick={() => {
+                const defaultFrames = Math.round(5 * imageFrameRate);
+                setLocalImageDurationFrames(defaultFrames);
+                updateItemDuration(channelId, layerId, item.id, 5);
+              }}
+            >
+              Reset
+            </button>
+            <button
+              className="io-done-btn"
+              title="Close editor"
+              onClick={() => setShowDurationEditor(false)}
             >
               Done
             </button>

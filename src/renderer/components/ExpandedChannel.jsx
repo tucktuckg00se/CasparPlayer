@@ -48,6 +48,7 @@ export default function ExpandedChannel() {
             key={layer.id}
             layer={layer}
             channelId={channel.id}
+            channelFrameRate={channel.channelFrameRate}
             expanded={true}
           />
         ))}

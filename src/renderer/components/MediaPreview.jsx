@@ -1,70 +1,67 @@
 import React, { useState, useEffect } from 'react';
+import { useApp } from '../context/AppContext';
 import { formatFileSize, formatDuration } from '../utils/fileTypes';
+import { localPathToCasparClip, findCasparMetadata, convertClipInfoToMetadata } from '../services/casparMediaService';
 import './MediaPreview.css';
 
 export default function MediaPreview({ file }) {
+  const { connection, state, getCasparThumbnail } = useApp();
   const [thumbnail, setThumbnail] = useState(null);
+  const [metadata, setMetadata] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [thumbnailError, setThumbnailError] = useState(false);
 
   useEffect(() => {
-    if (file && (file.type === 'video' || file.type === 'image')) {
-      loadThumbnail(file);
-    } else {
+    if (!file || !connection.isConnected) {
       setThumbnail(null);
-      setThumbnailError(false);
-    }
-  }, [file]);
-
-  const loadThumbnail = async (file) => {
-    setIsLoading(true);
-    setThumbnailError(false);
-
-    // For images, try using direct file URL first (faster)
-    if (file.type === 'image') {
-      try {
-        // Use file:// URL directly for images
-        const directUrl = `file://${file.path.replace(/\\/g, '/')}`;
-        setThumbnail(directUrl);
-        setIsLoading(false);
-        return;
-      } catch (e) {
-        console.log('Direct image load failed, trying thumbnail generator');
-      }
+      setMetadata(null);
+      return;
     }
 
-    // For videos or fallback, use thumbnail generator
-    try {
-      const { ipcRenderer } = window.require('electron');
-      const result = await ipcRenderer.invoke('media:generateThumbnail', file.path, file.type);
-      if (result?.thumbnail) {
-        setThumbnail(`file://${result.thumbnail.replace(/\\/g, '/')}?${Date.now()}`);
-      } else if (result?.error) {
-        console.warn('Thumbnail generation failed:', result.error);
-        setThumbnailError(true);
-        // For images, fall back to direct file URL even if thumbnail failed
-        if (file.type === 'image') {
-          setThumbnail(`file://${file.path.replace(/\\/g, '/')}`);
+    const loadCasparData = async () => {
+      setIsLoading(true);
+
+      // Get CasparCG clip name from local path
+      const clipName = localPathToCasparClip(file.path, state.media.rootPath);
+
+      if (clipName) {
+        // Get CasparCG metadata from cached list
+        const casparClip = findCasparMetadata(file.path, state.media.rootPath, state.casparMedia.list);
+        if (casparClip) {
+          setMetadata(convertClipInfoToMetadata(casparClip));
+        } else {
+          setMetadata(null);
         }
+
+        // Get CasparCG thumbnail
+        const thumb = await getCasparThumbnail(clipName);
+        setThumbnail(thumb);
+      } else {
+        setMetadata(null);
+        setThumbnail(null);
       }
-    } catch (error) {
-      console.error('Error loading thumbnail:', error);
-      setThumbnailError(true);
-      // For images, fall back to direct file URL
-      if (file.type === 'image') {
-        setThumbnail(`file://${file.path.replace(/\\/g, '/')}`);
-      }
-    } finally {
+
       setIsLoading(false);
-    }
-  };
+    };
 
-  const handleImageError = () => {
-    console.warn('Thumbnail image failed to load');
-    setThumbnailError(true);
-    setThumbnail(null);
-  };
+    loadCasparData();
+  }, [file, connection.isConnected, state.media.rootPath, state.casparMedia.list, getCasparThumbnail]);
 
+  // Not connected state
+  if (!connection.isConnected) {
+    return (
+      <div className="media-preview empty">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" opacity="0.3">
+          <path d="M1 1l22 22M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <line x1="12" y1="19" x2="12" y2="23" strokeWidth="2"/>
+          <line x1="8" y1="23" x2="16" y2="23" strokeWidth="2"/>
+        </svg>
+        <p>Connect to CasparCG to view media preview</p>
+      </div>
+    );
+  }
+
+  // No file selected state
   if (!file) {
     return (
       <div className="media-preview empty">
@@ -86,7 +83,7 @@ export default function MediaPreview({ file }) {
             <div className="loading-spinner" />
           </div>
         ) : thumbnail ? (
-          <img src={thumbnail} alt={file.name} onError={handleImageError} />
+          <img src={thumbnail} alt={file.name} />
         ) : (
           <div className="preview-placeholder">
             {getTypeIcon(file.type)}
@@ -100,46 +97,64 @@ export default function MediaPreview({ file }) {
         <div className="preview-details">
           <div className="detail-row">
             <span className="detail-label">Type</span>
-            <span className="detail-value type-badge" data-type={file.type}>
-              {file.type}
+            <span className="detail-value type-badge" data-type={metadata?.type || file.type}>
+              {metadata?.type || file.type}
             </span>
           </div>
 
-          {file.metadata?.resolution && (
-            <div className="detail-row">
-              <span className="detail-label">Resolution</span>
-              <span className="detail-value">{file.metadata.resolution}</span>
-            </div>
-          )}
-
-          {file.metadata?.duration > 0 && (
-            <div className="detail-row">
-              <span className="detail-label">Duration</span>
-              <span className="detail-value">{formatDuration(file.metadata.duration)}</span>
-            </div>
-          )}
-
-          {file.metadata?.frameRate > 0 && (
+          {metadata?.frameRate > 0 && (
             <div className="detail-row">
               <span className="detail-label">Frame Rate</span>
-              <span className="detail-value">{file.metadata.frameRate.toFixed(2)} fps</span>
+              <span className="detail-value">{metadata.frameRate.toFixed(2)} fps</span>
             </div>
           )}
 
-          {file.metadata?.codec && (
+          {metadata?.duration > 0 && (
             <div className="detail-row">
-              <span className="detail-label">Codec</span>
-              <span className="detail-value">{file.metadata.codec.toUpperCase()}</span>
+              <span className="detail-label">Duration</span>
+              <span className="detail-value">{formatDuration(metadata.duration)}</span>
             </div>
           )}
 
-          {file.size > 0 && (
+          {metadata?.frameCount > 0 && (
+            <div className="detail-row">
+              <span className="detail-label">Frames</span>
+              <span className="detail-value">{metadata.frameCount.toLocaleString()}</span>
+            </div>
+          )}
+
+          {metadata?.size > 0 && (
+            <div className="detail-row">
+              <span className="detail-label">Size</span>
+              <span className="detail-value">{formatFileSize(metadata.size)}</span>
+            </div>
+          )}
+
+          {!metadata && file.size > 0 && (
             <div className="detail-row">
               <span className="detail-label">Size</span>
               <span className="detail-value">{formatFileSize(file.size)}</span>
             </div>
           )}
         </div>
+
+        {metadata?.source === 'casparcg' && (
+          <div className="preview-source">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" opacity="0.5">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+            <span>CasparCG metadata</span>
+          </div>
+        )}
+
+        {!metadata && (
+          <div className="preview-source warning">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" opacity="0.5">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            <span>Not found in CasparCG media</span>
+          </div>
+        )}
 
         <div className="preview-path" title={file.path}>
           {file.relativePath || file.path}

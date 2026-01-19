@@ -329,3 +329,13 @@
 .io-done-btn:hover {
   opacity: 0.9;
 }
+
+.io-fps-display {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-align: right;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+

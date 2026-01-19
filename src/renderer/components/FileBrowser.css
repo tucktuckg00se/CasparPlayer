@@ -98,8 +98,48 @@
 .file-browser-preview {
   flex-shrink: 0;
   border-top: 1px solid var(--border-color);
-  max-height: 300px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-browser-preview-content {
+  flex: 1;
   overflow: auto;
+}
+
+/* Preview resize handle */
+.file-browser-preview .preview-resize-handle {
+  position: relative;
+  flex-shrink: 0;
+  height: 12px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 5;
+}
+
+.file-browser-preview .preview-resize-handle:hover,
+.file-browser-preview .preview-resize-handle.resizing {
+  background: rgba(0, 255, 136, 0.1);
+}
+
+.file-browser-preview .resize-handle-bar {
+  width: 60px;
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  transition: background 0.15s ease, width 0.15s ease;
+}
+
+.file-browser-preview .preview-resize-handle:hover .resize-handle-bar,
+.file-browser-preview .preview-resize-handle.resizing .resize-handle-bar {
+  background: var(--accent-primary);
+  width: 80px;
 }
 
 .file-tree {

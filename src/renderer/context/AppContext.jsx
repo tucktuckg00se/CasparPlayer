@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { CasparCG } from 'casparcg-connection';
 import { v4 as uuidv4 } from 'uuid';
-import casparCommands from '../services/casparCommands';
+import casparCommands, { cls, thumbnailRetrieve, info, parseChannelFrameRate } from '../services/casparCommands';
 import { processOscMessage } from '../services/oscHandler';
 import { executeMacro as runMacro } from '../services/macroExecutor';
+import { convertClipInfoToMetadata, localPathToCasparClip, findCasparMetadata } from '../services/casparMediaService';
 
 const AppContext = createContext();
 
@@ -21,6 +22,12 @@ const initialState = {
     rootPath: null,
     tree: [],
     selectedFile: null
+  },
+  casparMedia: {
+    list: [],           // Array of ClipInfo from CLS command
+    thumbnails: {},     // Cache: { [clipName]: base64DataUrl }
+    lastRefresh: null,
+    isLoading: false
   },
   macros: [],
   ui: {
@@ -71,6 +78,8 @@ export function AppProvider({ children }) {
   const heartbeatIntervalRef = useRef(null);
   const imageTimersRef = useRef({}); // Track image auto-advance timers by channel-layer key
   const lastTimeRef = useRef({}); // Track last time updates for completion detection
+  const imagePlayStartRef = useRef({}); // { [layerKey]: startTimestamp } for image time tracking
+  const imageElapsedRef = useRef({}); // { [layerKey]: elapsedSeconds } for pause/resume
 
   // Refs to track current state for the quit handler (avoids stale closure)
   const settingsRef = useRef(settings);
@@ -170,6 +179,17 @@ export function AppProvider({ children }) {
         })
       };
     });
+  }, []);
+
+  // Helper function to clear image timers and tracking for a layer
+  const clearImageTimer = useCallback((channelId, layerId) => {
+    const layerKey = `${channelId}-${layerId}`;
+    if (imageTimersRef.current[layerKey]) {
+      clearTimeout(imageTimersRef.current[layerKey]);
+      delete imageTimersRef.current[layerKey];
+    }
+    delete imagePlayStartRef.current[layerKey];
+    delete imageElapsedRef.current[layerKey];
   }, []);
 
   const handleOscUpdate = useCallback((update) => {
@@ -402,6 +422,39 @@ export function AppProvider({ children }) {
     };
   }, [connection.isConnected, connection.casparCG]);
 
+  // Interval-based time tracking for images (since CasparCG doesn't send OSC time updates for images)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setState(prev => {
+        let changed = false;
+        const newChannels = prev.channels.map(ch => ({
+          ...ch,
+          layers: ch.layers.map(l => {
+            const layerKey = `${ch.id}-${l.id}`;
+            const startTime = imagePlayStartRef.current[layerKey];
+
+            // Only update for playing images with a start time
+            if (l.isPlaying && !l.isPaused && startTime && l.currentIndex >= 0) {
+              const item = l.playlist[l.currentIndex];
+              if (item?.type === 'image' && item.duration > 0) {
+                const elapsed = (Date.now() - startTime) / 1000;
+                const currentTime = Math.min(elapsed, item.duration);
+                if (Math.abs(currentTime - l.currentTime) > 0.05) {
+                  changed = true;
+                  return { ...l, currentTime, totalTime: item.duration };
+                }
+              }
+            }
+            return l;
+          })
+        }));
+        return changed ? { ...prev, channels: newChannels } : prev;
+      });
+    }, 100); // Update every 100ms
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Process pending auto-advance
   useEffect(() => {
     if (!connection.casparCG || !connection.isConnected) return;
@@ -413,6 +466,8 @@ export function AppProvider({ children }) {
           const nextItem = layer.playlist[nextIndex];
 
           if (nextItem) {
+            const layerKey = `${channel.id}-${layer.id}`;
+
             try {
               // Import casparCommands dynamically to avoid circular dependencies
               await casparCommands.play(connection.casparCG, channel.id, layer.id, nextItem, {
@@ -420,6 +475,36 @@ export function AppProvider({ children }) {
                 inPoint: nextItem.inPoint,
                 outPoint: nextItem.outPoint
               });
+
+              // Clear any existing image timers
+              if (imageTimersRef.current[layerKey]) {
+                clearTimeout(imageTimersRef.current[layerKey]);
+                delete imageTimersRef.current[layerKey];
+              }
+              delete imageElapsedRef.current[layerKey];
+
+              // Set up image timing for auto-advanced items
+              if (nextItem.type === 'image') {
+                imagePlayStartRef.current[layerKey] = Date.now();
+
+                // Set auto-advance timer if playlist mode and not looping item
+                if (layer.playlistMode && nextItem.duration > 0 && !layer.loopItem) {
+                  imageTimersRef.current[layerKey] = setTimeout(() => {
+                    setState(currentState => {
+                      const ch = currentState.channels.find(c => c.id === channel.id);
+                      const ly = ch?.layers.find(l => l.id === layer.id);
+                      if (ly?.playlistMode && !ly?.loopItem) {
+                        setTimeout(() => autoAdvanceNext(channel.id, layer.id), 0);
+                      }
+                      return currentState;
+                    });
+                    delete imageTimersRef.current[layerKey];
+                  }, nextItem.duration * 1000);
+                }
+              } else {
+                // Clear image tracking for non-images
+                delete imagePlayStartRef.current[layerKey];
+              }
 
               // Update state to reflect playing
               setState(prev => ({
@@ -446,8 +531,8 @@ export function AppProvider({ children }) {
                 })
               }));
 
-              // Load next item in background if playlist mode
-              if (layer.playlistMode && nextIndex < layer.playlist.length - 1) {
+              // Load next item in background if playlist mode (for videos only)
+              if (layer.playlistMode && nextIndex < layer.playlist.length - 1 && nextItem.type !== 'image') {
                 const bgItem = layer.playlist[nextIndex + 1];
                 await casparCommands.loadBg(connection.casparCG, channel.id, layer.id, bgItem, {
                   auto: true,
@@ -477,7 +562,7 @@ export function AppProvider({ children }) {
         }
       });
     });
-  }, [state.channels, connection.casparCG, connection.isConnected]);
+  }, [state.channels, connection.casparCG, connection.isConnected, autoAdvanceNext]);
 
   // Load config: Only loads connection settings and app settings (not channel state)
   // Channel state is loaded separately via rundowns
@@ -730,6 +815,49 @@ export function AppProvider({ children }) {
       }
 
       console.log('Connected to CasparCG:', serverInfo);
+
+      // Auto-refresh CasparCG media list and channel frame rates after connection
+      setTimeout(async () => {
+        try {
+          const mediaList = await cls(ccg);
+          console.log('CLS auto-refresh returned', mediaList.length, 'items');
+          setState(prev => ({
+            ...prev,
+            casparMedia: {
+              ...prev.casparMedia,
+              list: mediaList,
+              lastRefresh: new Date().toISOString(),
+              isLoading: false
+            }
+          }));
+        } catch (error) {
+          console.warn('Auto-refresh CasparCG media failed:', error);
+        }
+
+        // Fetch channel frame rates for all existing channels
+        try {
+          const currentChannels = stateRef.current.channels;
+          for (const channel of currentChannels) {
+            const infoData = await info(ccg, channel.id);
+            const frameRate = parseChannelFrameRate(infoData);
+            if (frameRate) {
+              console.log(`Channel ${channel.id} frame rate: ${frameRate}`);
+              setState(prev => ({
+                ...prev,
+                channels: prev.channels.map(ch => {
+                  if (ch.id === channel.id) {
+                    return { ...ch, channelFrameRate: frameRate };
+                  }
+                  return ch;
+                })
+              }));
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to fetch channel frame rates:', error);
+        }
+      }, 500);
+
       return true;
     } catch (error) {
       console.error('Connection failed:', error);
@@ -818,6 +946,41 @@ export function AppProvider({ children }) {
     deletedItems: []        // Undo stack for deleted items
   });
 
+  // Fetch channel frame rate from CasparCG INFO command
+  const fetchChannelFrameRate = useCallback(async (channelId, ccg = null) => {
+    const casparCG = ccg || connection.casparCG;
+    if (!casparCG) return;
+
+    try {
+      const infoData = await info(casparCG, channelId);
+      const frameRate = parseChannelFrameRate(infoData);
+
+      if (frameRate) {
+        setState(prev => ({
+          ...prev,
+          channels: prev.channels.map(ch => {
+            if (ch.id === channelId) {
+              return { ...ch, channelFrameRate: frameRate };
+            }
+            return ch;
+          })
+        }));
+      }
+    } catch (error) {
+      console.warn(`Failed to fetch frame rate for channel ${channelId}:`, error);
+    }
+  }, [connection.casparCG]);
+
+  // Fetch frame rates for all existing channels
+  const fetchAllChannelFrameRates = useCallback(async (ccg = null) => {
+    const casparCG = ccg || connection.casparCG;
+    if (!casparCG) return;
+
+    for (const channel of state.channels) {
+      await fetchChannelFrameRate(channel.id, casparCG);
+    }
+  }, [state.channels, fetchChannelFrameRate, connection.casparCG]);
+
   // Compute relative path from media root
   const computeRelativePath = useCallback((fullPath, mediaRoot) => {
     if (!mediaRoot || !fullPath) return null;
@@ -842,31 +1005,34 @@ export function AppProvider({ children }) {
 
   // Playlist Management
   const addMediaToPlaylist = useCallback(async (channelId, layerId, mediaFile) => {
-    const { ipcRenderer } = window.require('electron');
-
     // Compute relative path from media root
     const relativePath = computeRelativePath(mediaFile.path, state.media.rootPath);
 
     // Determine media type from file extension or metadata
-    const fileType = mediaFile.type || getFileType(mediaFile.name);
+    let fileType = mediaFile.type || getFileType(mediaFile.name);
 
-    // Get duration and frameRate from existing metadata or default
-    let duration = mediaFile.metadata?.duration || (fileType === 'image' ? settings.defaultImageDuration : 0);
-    let resolution = mediaFile.metadata?.resolution || '';
-    let frameRate = mediaFile.metadata?.frameRate ?? 25; // Default to 25fps
+    // Get duration and frameRate - prefer CasparCG metadata
+    let duration = fileType === 'image' ? settings.defaultImageDuration : 0;
+    let resolution = '';
+    let frameRate = 25; // Default fallback
 
-    // If it's a video and we don't have duration, fetch metadata
-    if (fileType === 'video' && !mediaFile.metadata?.duration) {
-      try {
-        const metadata = await ipcRenderer.invoke('media:getMetadata', mediaFile.path, 'video');
-        if (metadata) {
-          duration = metadata.duration || 0;
-          resolution = metadata.resolution || '';
-          frameRate = metadata.frameRate ?? 25;
+    // First, check CasparCG media list for metadata (most accurate source)
+    const casparClip = findCasparMetadata(mediaFile.path, state.media.rootPath, state.casparMedia.list);
+    if (casparClip) {
+      const casparMeta = convertClipInfoToMetadata(casparClip);
+      if (casparMeta) {
+        duration = casparMeta.duration || duration;
+        frameRate = casparMeta.frameRate || frameRate;
+        // Update fileType based on CasparCG's detection
+        if (casparMeta.type && casparMeta.type !== 'media') {
+          fileType = casparMeta.type;
         }
-      } catch (err) {
-        console.warn('Failed to get video metadata:', err);
       }
+    } else if (mediaFile.metadata) {
+      // Fall back to file browser metadata
+      duration = mediaFile.metadata.duration || duration;
+      resolution = mediaFile.metadata.resolution || '';
+      frameRate = mediaFile.metadata.frameRate ?? frameRate;
     }
 
     const itemId = uuidv4();
@@ -908,7 +1074,7 @@ export function AppProvider({ children }) {
         return ch;
       })
     }));
-  }, [state.media.rootPath, settings.defaultImageDuration, computeRelativePath]);
+  }, [state.media.rootPath, state.casparMedia.list, settings.defaultImageDuration, computeRelativePath]);
 
   // Helper to determine file type from filename
   const getFileType = (filename) => {
@@ -924,6 +1090,9 @@ export function AppProvider({ children }) {
 
   // Delete layer
   const deleteLayer = useCallback((channelId, layerId) => {
+    // Clear any image timers for this layer
+    clearImageTimer(channelId, layerId);
+
     setState(prev => ({
       ...prev,
       channels: prev.channels.map(ch => {
@@ -936,7 +1105,7 @@ export function AppProvider({ children }) {
         return ch;
       })
     }));
-  }, []);
+  }, [clearImageTimer]);
 
   // Select playlist item
   const selectPlaylistItem = useCallback((channelId, layerId, itemId) => {
@@ -1072,6 +1241,41 @@ export function AppProvider({ children }) {
                       const inPoint = inPointFrames !== null ? inPointFrames / frameRate : null;
                       const outPoint = outPointFrames !== null ? outPointFrames / frameRate : null;
                       return { ...item, inPointFrames, outPointFrames, inPoint, outPoint };
+                    }
+                    return item;
+                  })
+                };
+              }
+              return layer;
+            })
+          };
+        }
+        return ch;
+      })
+    }));
+  }, []);
+
+  // Update item metadata (for verifying/updating frameRate, duration, etc.)
+  const updateItemMetadata = useCallback((channelId, layerId, itemId, metadata) => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch => {
+        if (ch.id === channelId) {
+          return {
+            ...ch,
+            layers: ch.layers.map(layer => {
+              if (layer.id === layerId) {
+                return {
+                  ...layer,
+                  playlist: layer.playlist.map(item => {
+                    if (item.id === itemId) {
+                      return {
+                        ...item,
+                        frameRate: metadata.frameRate ?? item.frameRate,
+                        duration: metadata.duration ?? item.duration,
+                        resolution: metadata.resolution ?? item.resolution,
+                        metadataVerified: true
+                      };
                     }
                     return item;
                   })
@@ -1457,6 +1661,16 @@ export function AppProvider({ children }) {
         clearTimeout(imageTimersRef.current[layerKey]);
         delete imageTimersRef.current[layerKey];
       }
+      // Clear any previous elapsed time tracking
+      delete imageElapsedRef.current[layerKey];
+
+      // Set start timestamp for image time tracking
+      if (item.type === 'image') {
+        imagePlayStartRef.current[layerKey] = Date.now();
+      } else {
+        // Clear image tracking for non-images
+        delete imagePlayStartRef.current[layerKey];
+      }
 
       // If it's an image and playlist mode is enabled, set auto-advance timeout
       if (item.type === 'image' && layer.playlistMode && item.duration > 0 && !layer.loopItem) {
@@ -1497,6 +1711,21 @@ export function AppProvider({ children }) {
   const pausePlayback = useCallback(async (channelId, layerId) => {
     if (!connection.casparCG || !connection.isConnected) return false;
 
+    const layerKey = `${channelId}-${layerId}`;
+
+    // Clear image auto-advance timer (no advance while paused)
+    if (imageTimersRef.current[layerKey]) {
+      clearTimeout(imageTimersRef.current[layerKey]);
+      delete imageTimersRef.current[layerKey];
+    }
+
+    // Store elapsed time for image playback so we can resume correctly
+    const startTime = imagePlayStartRef.current[layerKey];
+    if (startTime) {
+      imageElapsedRef.current[layerKey] = (Date.now() - startTime) / 1000;
+      delete imagePlayStartRef.current[layerKey];
+    }
+
     try {
       await casparCommands.pause(connection.casparCG, channelId, layerId);
 
@@ -1529,8 +1758,41 @@ export function AppProvider({ children }) {
   const resumePlayback = useCallback(async (channelId, layerId) => {
     if (!connection.casparCG || !connection.isConnected) return false;
 
+    const layerKey = `${channelId}-${layerId}`;
+
     try {
       await casparCommands.resume(connection.casparCG, channelId, layerId);
+
+      // Get current state to check if this is an image and get item info
+      const channel = state.channels.find(ch => ch.id === channelId);
+      const layer = channel?.layers.find(l => l.id === layerId);
+      const currentItem = layer?.currentIndex >= 0 ? layer.playlist[layer.currentIndex] : null;
+
+      // Restore image timing if resuming an image
+      if (currentItem?.type === 'image') {
+        const elapsed = imageElapsedRef.current[layerKey] || 0;
+        // Recalculate start time to account for already elapsed time
+        imagePlayStartRef.current[layerKey] = Date.now() - (elapsed * 1000);
+        delete imageElapsedRef.current[layerKey];
+
+        // Restart auto-advance timer if playlist mode is enabled
+        if (layer?.playlistMode && currentItem.duration > 0 && !layer.loopItem) {
+          const remainingTime = currentItem.duration - elapsed;
+          if (remainingTime > 0) {
+            imageTimersRef.current[layerKey] = setTimeout(() => {
+              setState(currentState => {
+                const ch = currentState.channels.find(c => c.id === channelId);
+                const ly = ch?.layers.find(l => l.id === layerId);
+                if (ly?.playlistMode && !ly?.loopItem) {
+                  setTimeout(() => autoAdvanceNext(channelId, layerId), 0);
+                }
+                return currentState;
+              });
+              delete imageTimersRef.current[layerKey];
+            }, remainingTime * 1000);
+          }
+        }
+      }
 
       setState(prev => ({
         ...prev,
@@ -1555,11 +1817,14 @@ export function AppProvider({ children }) {
       console.error('Failed to resume:', error);
       return false;
     }
-  }, [connection.casparCG, connection.isConnected]);
+  }, [connection.casparCG, connection.isConnected, state.channels, autoAdvanceNext]);
 
   // Stop playback
   const stopPlayback = useCallback(async (channelId, layerId) => {
     if (!connection.casparCG || !connection.isConnected) return false;
+
+    // Clear image timers before updating state
+    clearImageTimer(channelId, layerId);
 
     try {
       await casparCommands.stop(connection.casparCG, channelId, layerId);
@@ -1597,7 +1862,7 @@ export function AppProvider({ children }) {
       console.error('Failed to stop:', error);
       return false;
     }
-  }, [connection.casparCG, connection.isConnected]);
+  }, [connection.casparCG, connection.isConnected, clearImageTimer]);
 
   // Go to next item
   const nextItem = useCallback(async (channelId, layerId) => {
@@ -1688,6 +1953,77 @@ export function AppProvider({ children }) {
       }
     }));
   }, []);
+
+  // Refresh CasparCG media list via CLS command
+  const refreshCasparMedia = useCallback(async () => {
+    if (!connection.casparCG || !connection.isConnected) {
+      console.warn('Cannot refresh CasparCG media: Not connected');
+      return;
+    }
+
+    setState(prev => ({
+      ...prev,
+      casparMedia: { ...prev.casparMedia, isLoading: true }
+    }));
+
+    try {
+      const mediaList = await cls(connection.casparCG);
+      console.log('CLS returned', mediaList.length, 'items');
+
+      setState(prev => ({
+        ...prev,
+        casparMedia: {
+          ...prev.casparMedia,
+          list: mediaList,
+          lastRefresh: new Date().toISOString(),
+          isLoading: false
+        }
+      }));
+    } catch (error) {
+      console.error('Failed to refresh CasparCG media:', error);
+      setState(prev => ({
+        ...prev,
+        casparMedia: { ...prev.casparMedia, isLoading: false }
+      }));
+    }
+  }, [connection.casparCG, connection.isConnected]);
+
+  // Get CasparCG thumbnail for a clip (with caching)
+  const getCasparThumbnail = useCallback(async (clipName) => {
+    if (!connection.casparCG || !connection.isConnected || !clipName) {
+      return null;
+    }
+
+    // Check cache first
+    if (state.casparMedia.thumbnails[clipName]) {
+      return state.casparMedia.thumbnails[clipName];
+    }
+
+    try {
+      const base64Data = await thumbnailRetrieve(connection.casparCG, clipName);
+      if (base64Data) {
+        // Convert to data URL and cache
+        const dataUrl = `data:image/png;base64,${base64Data}`;
+
+        setState(prev => ({
+          ...prev,
+          casparMedia: {
+            ...prev.casparMedia,
+            thumbnails: {
+              ...prev.casparMedia.thumbnails,
+              [clipName]: dataUrl
+            }
+          }
+        }));
+
+        return dataUrl;
+      }
+    } catch (error) {
+      console.warn('Failed to retrieve thumbnail for', clipName, error);
+    }
+
+    return null;
+  }, [connection.casparCG, connection.isConnected, state.casparMedia.thumbnails]);
 
   // Toggle folder expand/collapse in media tree
   const toggleFolderExpand = useCallback((folderId) => {
@@ -1985,6 +2321,7 @@ export function AppProvider({ children }) {
     reorderPlaylistItems,
     updateItemDuration,
     updateItemInOutPoints,
+    updateItemMetadata,
     selectPlaylistItems,
     deleteSelectedItems,
     undoDelete,
@@ -2019,7 +2356,10 @@ export function AppProvider({ children }) {
     saveRundown,
     loadRundown,
     deleteRundown,
-    clearAllChannels
+    clearAllChannels,
+    // CasparCG media functions
+    refreshCasparMedia,
+    getCasparThumbnail
   };
 
   return (

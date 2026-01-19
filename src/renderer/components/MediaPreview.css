@@ -135,6 +135,22 @@
   color: #00cec9;
 }
 
+.preview-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--status-ok);
+  padding: 6px 8px;
+  background: rgba(0, 184, 148, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.preview-source.warning {
+  color: var(--status-warning);
+  background: rgba(255, 193, 7, 0.1);
+}
+
 .preview-path {
   font-size: 11px;
   color: var(--text-tertiary);
