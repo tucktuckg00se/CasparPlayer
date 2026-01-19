@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "description": "Professional CasparCG broadcast playout client",
   "main": "src/main/main.js",
-  "overrides": {
-    "tar": "^7.5.3"
-  },
   "scripts": {
     "start": "npm run webpack && electron .",
     "dev": "npm run webpack:watch & electron . --dev",
