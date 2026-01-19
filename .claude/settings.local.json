@@ -16,7 +16,9 @@
       "WebFetch(domain:casparcgforum.org)",
       "Bash(dir /s /b node_modulescasparcg-connection*.d.ts)",
       "Bash(npm run build:renderer:*)",
-      "Bash(npm run)"
+      "Bash(npm run)",
+      "Bash(npm audit:*)",
+      "Bash(npm view:*)"
     ]
   }
 }

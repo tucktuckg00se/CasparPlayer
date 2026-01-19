@@ -223,8 +223,12 @@ export function AppProvider({ children }) {
           // Only trigger once per completion
           if (!lastTime || lastTime.completed !== true) {
             lastTimeRef.current[layerKey] = { ...update, totalTime: effectiveTotalTime, completed: true };
-            // Trigger auto-advance (schedule outside setState to avoid nested updates)
-            setTimeout(() => autoAdvanceNext(channel, layer), 0);
+            // Only auto-advance if NOT looping the current item
+            // When loopItem is enabled, CasparCG handles the loop server-side
+            if (l && !l.loopItem) {
+              // Trigger auto-advance (schedule outside setState to avoid nested updates)
+              setTimeout(() => autoAdvanceNext(channel, layer), 0);
+            }
           }
         } else {
           lastTimeRef.current[layerKey] = { ...update, totalTime: effectiveTotalTime, completed: false };

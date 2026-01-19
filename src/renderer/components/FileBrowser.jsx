@@ -8,7 +8,7 @@ export default function FileBrowser() {
   const { state, connection, settings, setMediaRoot, selectMediaFile, toggleFolderExpand, refreshCasparMedia } = useApp();
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
-  const [previewHeight, setPreviewHeight] = useState(250);
+  const [previewHeight, setPreviewHeight] = useState(450);
   const [isResizing, setIsResizing] = useState(false);
   const resizeStartY = useRef(0);
   const resizeStartHeight = useRef(0);

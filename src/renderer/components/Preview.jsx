@@ -123,6 +123,8 @@ export default function Preview({ channelId, expanded = false }) {
         console.error(`[Preview ${channelId}] mpegts error:`, errorType, errorDetail, errorInfo);
         if (errorType === mpegts.ErrorTypes.NETWORK_ERROR) {
           setError('Network error - stream may have ended');
+          // Clean up on network error to allow reconnection
+          handleDisconnect();
         } else if (errorType === mpegts.ErrorTypes.MEDIA_ERROR) {
           setError('Media error - codec issue');
         } else {

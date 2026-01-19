@@ -23,9 +23,24 @@ class StreamRelay extends EventEmitter {
         this.handleRequest(req, res);
       });
 
+      // Configure socket timeouts to handle stale connections
+      this.server.keepAliveTimeout = 60000; // 60 seconds
+      this.server.headersTimeout = 65000; // Slightly higher than keepAliveTimeout
+      this.server.timeout = 0; // Disable request timeout for streaming
+
       this.server.on('error', (err) => {
         console.error(`[StreamRelay ${this.channelId}] Server error:`, err);
         reject(err);
+      });
+
+      // Handle connection-level errors
+      this.server.on('connection', (socket) => {
+        socket.on('error', (err) => {
+          // Ignore ECONNRESET - this is normal when clients disconnect
+          if (err.code !== 'ECONNRESET') {
+            console.warn(`[StreamRelay ${this.channelId}] Socket error:`, err.message);
+          }
+        });
       });
 
       this.server.listen(this.port, '0.0.0.0', () => {
@@ -77,15 +92,37 @@ class StreamRelay extends EventEmitter {
 
     req.on('data', (chunk) => {
       // Relay data to all connected clients
+      // Use a copy of clients set to allow safe deletion during iteration
+      const clientsToRemove = [];
+
       for (const client of this.clients) {
         try {
-          if (!client.writableEnded) {
-            client.write(chunk);
+          if (!client.writableEnded && !client.destroyed) {
+            // Write returns false if the buffer is full, but we don't need to wait
+            client.write(chunk, (err) => {
+              if (err) {
+                // Async write error - remove client on next iteration
+                if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
+                  console.warn(`[StreamRelay ${this.channelId}] Async write error:`, err.message);
+                }
+                this.clients.delete(client);
+              }
+            });
+          } else {
+            clientsToRemove.push(client);
           }
         } catch (err) {
-          console.warn(`[StreamRelay ${this.channelId}] Error writing to client:`, err.message);
-          this.clients.delete(client);
+          // Synchronous write error
+          if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
+            console.warn(`[StreamRelay ${this.channelId}] Error writing to client:`, err.message);
+          }
+          clientsToRemove.push(client);
         }
+      }
+
+      // Remove dead clients
+      for (const client of clientsToRemove) {
+        this.clients.delete(client);
       }
     });
 
@@ -98,7 +135,10 @@ class StreamRelay extends EventEmitter {
     });
 
     req.on('error', (err) => {
-      console.error(`[StreamRelay ${this.channelId}] Incoming stream error:`, err);
+      // Ignore ECONNRESET - this is normal when ffmpeg disconnects
+      if (err.code !== 'ECONNRESET') {
+        console.error(`[StreamRelay ${this.channelId}] Incoming stream error:`, err);
+      }
       this.isReceiving = false;
       this.emit('streamError', { channelId: this.channelId, error: err.message });
     });
@@ -120,6 +160,15 @@ class StreamRelay extends EventEmitter {
     this.clients.add(res);
     this.emit('clientConnected', { channelId: this.channelId, clientCount: this.clients.size });
 
+    // Handle response errors (ECONNRESET, EPIPE, etc.)
+    res.on('error', (err) => {
+      // Ignore ECONNRESET and EPIPE - these are normal when clients disconnect
+      if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
+        console.warn(`[StreamRelay ${this.channelId}] Response error:`, err.message);
+      }
+      this.clients.delete(res);
+    });
+
     // Handle client disconnect
     req.on('close', () => {
       console.log(`[StreamRelay ${this.channelId}] Browser client disconnected`);
@@ -128,7 +177,10 @@ class StreamRelay extends EventEmitter {
     });
 
     req.on('error', (err) => {
-      console.warn(`[StreamRelay ${this.channelId}] Client error:`, err.message);
+      // Ignore ECONNRESET - this is normal when clients disconnect
+      if (err.code !== 'ECONNRESET') {
+        console.warn(`[StreamRelay ${this.channelId}] Client request error:`, err.message);
+      }
       this.clients.delete(res);
     });
   }
