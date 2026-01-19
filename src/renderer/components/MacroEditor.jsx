@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { createMacroTemplate, createCommandTemplate, COMMAND_TYPES } from '../services/macroExecutor';
+import { createMacroTemplate, createCommandTemplate } from '../services/macroExecutor';
+import { getCommandTypesForEditor } from '../services/commandHandler';
+import { createDefaultOffset } from '../utils/timecode';
 import StyledSelect from './StyledSelect';
+import OffsetTimecodeInput from './OffsetTimecodeInput';
 import './MacroEditor.css';
+
+// Get command types from unified command handler
+const COMMAND_TYPES = getCommandTypesForEditor();
 
 export default function MacroEditor({ macro, onSave, onCancel }) {
   const [editedMacro, setEditedMacro] = useState(null);
@@ -175,6 +181,24 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
     });
   };
 
+  // Handle offset change from OffsetTimecodeInput
+  const handleOffsetChange = (offset) => {
+    onUpdate({ offset });
+  };
+
+  // Ensure command has offset object (migrate from legacy delay)
+  const getOffset = () => {
+    if (command.offset) return command.offset;
+    // Migrate legacy delay (ms) to offset
+    if (command.delay > 0) {
+      const totalSeconds = command.delay / 1000;
+      const seconds = Math.floor(totalSeconds);
+      const frames = Math.round((totalSeconds % 1) * 25); // Assume 25fps for legacy
+      return { hours: 0, minutes: 0, seconds, frames, negative: false };
+    }
+    return createDefaultOffset();
+  };
+
   return (
     <div className="command-editor">
       <div className="command-header">
@@ -188,7 +212,7 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
             value: t.value,
             label: t.label,
             description: t.description,
-            category: t.category === 'caspar' ? 'CasparCG Commands' : 'Client Commands'
+            category: t.category
           }))}
           groupBy="category"
         />
@@ -247,18 +271,17 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
             min="1"
           />
 
-          <label>Delay (ms)</label>
-          <input
-            type="number"
-            className="input param-input"
-            value={command.delay}
-            onChange={e => onUpdate({ delay: parseInt(e.target.value) || 0 })}
-            min="0"
-            step="100"
+          <label>Offset</label>
+          <OffsetTimecodeInput
+            value={getOffset()}
+            onChange={handleOffsetChange}
+            frameRate={25}
+            allowNegative={true}
+            compact={true}
           />
         </div>
 
-        {(command.type === 'PLAY' || command.type === 'LOADBG') && (
+        {(command.type === 'casparPlay' || command.type === 'casparLoadBg') && (
           <div className="param-row">
             <label>Clip</label>
             <input
@@ -279,7 +302,7 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
           </div>
         )}
 
-        {command.type === 'CG_ADD' && (
+        {command.type === 'cgAdd' && (
           <div className="param-row">
             <label>Template</label>
             <input
@@ -292,7 +315,7 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
           </div>
         )}
 
-        {command.type === 'CUSTOM' && (
+        {command.type === 'custom' && (
           <div className="param-row">
             <label>AMCP Command</label>
             <input
@@ -301,6 +324,32 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
               value={command.params.amcp || ''}
               onChange={e => handleParamChange('amcp', e.target.value)}
               placeholder="e.g., PLAY 1-10 AMB LOOP"
+            />
+          </div>
+        )}
+
+        {command.type === 'loadRundown' && (
+          <div className="param-row">
+            <label>Rundown Name</label>
+            <input
+              type="text"
+              className="input"
+              value={command.params.name || ''}
+              onChange={e => handleParamChange('name', e.target.value)}
+              placeholder="Rundown name"
+            />
+          </div>
+        )}
+
+        {command.type === 'executeMacro' && (
+          <div className="param-row">
+            <label>Macro ID</label>
+            <input
+              type="text"
+              className="input"
+              value={command.params.macroId || ''}
+              onChange={e => handleParamChange('macroId', e.target.value)}
+              placeholder="Macro ID"
             />
           </div>
         )}

@@ -4,7 +4,7 @@ import StyledSelect from './StyledSelect';
 import './Settings.css';
 
 export default function Settings({ onClose }) {
-  const { settings, updateSettings, state, setMediaRoot } = useApp();
+  const { settings, updateSettings, state, setMediaRoot, apiStatus } = useApp();
   const [editedSettings, setEditedSettings] = useState({ ...settings });
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('connection');
@@ -83,6 +83,12 @@ export default function Settings({ onClose }) {
             onClick={() => setActiveTab('media')}
           >
             Media
+          </button>
+          <button
+            className={`settings-tab ${activeTab === 'api' ? 'active' : ''}`}
+            onClick={() => setActiveTab('api')}
+          >
+            API
           </button>
         </div>
 
@@ -188,7 +194,9 @@ export default function Settings({ onClose }) {
                       { value: '288:162', label: '288x162 (Low)' },
                       { value: '384:216', label: '384x216 (Default)' },
                       { value: '480:270', label: '480x270 (Medium)' },
-                      { value: '640:360', label: '640x360 (High)' }
+                      { value: '640:360', label: '640x360 (High)' },
+                      { value: '1280:720', label: '1280x720 (Higher)' },
+                      { value: '1920:1080', label: '1920x1080 (Highest)' }
                     ]}
                   />
                 </div>
@@ -304,6 +312,63 @@ export default function Settings({ onClose }) {
                   Auto-load last session on startup
                 </label>
                 <span className="input-hint">Restore channels and playlists from previous session</span>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'api' && (
+            <div className="settings-section">
+              <h3 className="settings-section-title">External Control API</h3>
+
+              <div className="input-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={editedSettings.apiEnabled || false}
+                    onChange={(e) => handleChange('apiEnabled', e.target.checked)}
+                  />
+                  Enable HTTP/WebSocket API
+                </label>
+                <span className="input-hint">Allow external applications to control this client</span>
+              </div>
+
+              <div className="input-group">
+                <label htmlFor="apiPort">API Port</label>
+                <input
+                  id="apiPort"
+                  type="number"
+                  className="input"
+                  value={editedSettings.apiPort || 8088}
+                  onChange={(e) => handleChange('apiPort', parseInt(e.target.value) || 8088)}
+                  disabled={!editedSettings.apiEnabled}
+                />
+                <span className="input-hint">HTTP and WebSocket server port</span>
+              </div>
+
+              {editedSettings.apiEnabled && (
+                <div className="api-info" style={{ marginTop: '16px', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '6px' }}>
+                  <div style={{ marginBottom: '8px' }}>
+                    <span style={{ color: apiStatus?.isRunning ? 'var(--success)' : 'var(--text-secondary)' }}>
+                      {apiStatus?.isRunning ? 'Server Running' : 'Server Stopped'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                    <div><strong>REST:</strong> http://127.0.0.1:{editedSettings.apiPort || 8088}/api/</div>
+                    <div><strong>WebSocket:</strong> ws://127.0.0.1:{editedSettings.apiPort || 8088}/ws</div>
+                  </div>
+                </div>
+              )}
+
+              <h3 className="settings-section-title" style={{ marginTop: '20px' }}>API Documentation</h3>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <p style={{ marginBottom: '8px' }}>Available endpoints:</p>
+                <ul style={{ marginLeft: '16px', marginBottom: '8px' }}>
+                  <li><code>POST /api/command</code> - Execute commands</li>
+                  <li><code>GET /api/state</code> - Get current state</li>
+                  <li><code>GET /api/status</code> - Get server status</li>
+                  <li><code>GET /api/commands</code> - List available commands</li>
+                </ul>
+                <p>WebSocket clients receive real-time state updates.</p>
               </div>
             </div>
           )}

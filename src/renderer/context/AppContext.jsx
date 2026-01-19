@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import casparCommands, { cls, thumbnailList, thumbnailRetrieve, thumbnailGenerate, info, parseChannelInfo } from '../services/casparCommands';
 import { processOscMessage } from '../services/oscHandler';
 import { executeMacro as runMacro } from '../services/macroExecutor';
+import { executeCommand as executeUnifiedCommand } from '../services/commandHandler';
 import { convertClipInfoToMetadata, localPathToCasparClip, findCasparMetadata } from '../services/casparMediaService';
 
 const AppContext = createContext();
@@ -71,9 +72,13 @@ export function AppProvider({ children }) {
     previewAudioBitrate: '128k',
     // Session and preview settings
     autoLoadLastSession: true,  // Auto-load last session on startup
-    autoConnectPreviews: false  // Auto-connect previews when loading rundowns
+    autoConnectPreviews: false,  // Auto-connect previews when loading rundowns
+    // External API settings
+    apiEnabled: false,
+    apiPort: 8088
   });
   const [rundowns, setRundowns] = useState([]);
+  const [apiStatus, setApiStatus] = useState({ isRunning: false, port: null });
   const oscListenerRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
   const imageTimersRef = useRef({}); // Track image auto-advance timers by channel-layer key
@@ -2417,6 +2422,161 @@ export function AppProvider({ children }) {
     }));
   }, []);
 
+  // ==================== External API Integration ====================
+
+  // Get state formatted for API consumers
+  const getStateForApi = useCallback(() => ({
+    connection: {
+      isConnected: connection.isConnected,
+      host: connection.host,
+      port: connection.port,
+      serverVersion: connection.serverInfo?.version
+    },
+    channels: state.channels.map(ch => ({
+      id: ch.id,
+      name: ch.name,
+      layers: ch.layers.map(l => ({
+        id: l.id,
+        casparLayer: l.casparLayer,
+        isPlaying: l.isPlaying,
+        isPaused: l.isPaused,
+        currentIndex: l.currentIndex,
+        playlistMode: l.playlistMode,
+        loopMode: l.loopMode,
+        loopItem: l.loopItem,
+        currentTime: l.currentTime,
+        duration: l.totalTime,
+        playlistLength: l.playlist?.length || 0,
+        currentItem: l.playlist?.[l.currentIndex]?.name || null
+      }))
+    })),
+    macros: state.macros?.map(m => ({ id: m.id, name: m.name })) || [],
+    rundowns: rundowns?.map(r => ({ id: r.id, name: r.name })) || []
+  }), [connection, state.channels, state.macros, rundowns]);
+
+  // Start API server
+  const startApiServer = useCallback(async (port) => {
+    const { ipcRenderer } = window.require('electron');
+    try {
+      const result = await ipcRenderer.invoke('api:start', port || settings.apiPort);
+      if (result.success) {
+        setApiStatus({ isRunning: true, port: result.port });
+      }
+      return result;
+    } catch (error) {
+      console.error('Failed to start API server:', error);
+      return { success: false, error: error.message };
+    }
+  }, [settings.apiPort]);
+
+  // Stop API server
+  const stopApiServer = useCallback(async () => {
+    const { ipcRenderer } = window.require('electron');
+    try {
+      const result = await ipcRenderer.invoke('api:stop');
+      setApiStatus({ isRunning: false, port: null });
+      return result;
+    } catch (error) {
+      console.error('Failed to stop API server:', error);
+      return { success: false, error: error.message };
+    }
+  }, []);
+
+  // API command and state request listeners
+  useEffect(() => {
+    const { ipcRenderer } = window.require('electron');
+
+    // Build command context with all available app functions
+    const getCommandContext = () => ({
+      appContext: {
+        playItem,
+        pausePlayback,
+        resumePlayback,
+        stopPlayback,
+        nextItem,
+        prevItem,
+        togglePlaylistMode,
+        toggleLoopMode,
+        toggleLoopItem,
+        loadRundown,
+        saveRundown,
+        clearAllChannels,
+        addChannel,
+        addLayer,
+        deleteChannel,
+        deleteLayer,
+        executeMacro
+      },
+      casparCG: connection.casparCG,
+      state
+    });
+
+    // Handle incoming API commands
+    const handleApiCommand = async (event, { command, params, requestId }) => {
+      try {
+        const result = await executeUnifiedCommand(command, params, getCommandContext());
+        ipcRenderer.send('api:command-response', {
+          requestId,
+          success: result.success !== false,
+          result
+        });
+      } catch (error) {
+        console.error('API command failed:', command, error);
+        ipcRenderer.send('api:command-response', {
+          requestId,
+          success: false,
+          error: error.message
+        });
+      }
+    };
+
+    // Handle state requests from API
+    const handleStateRequest = (event, { requestId }) => {
+      ipcRenderer.send('api:state-response', {
+        requestId,
+        state: getStateForApi()
+      });
+    };
+
+    ipcRenderer.on('api:command', handleApiCommand);
+    ipcRenderer.on('api:state-request', handleStateRequest);
+
+    return () => {
+      ipcRenderer.removeListener('api:command', handleApiCommand);
+      ipcRenderer.removeListener('api:state-request', handleStateRequest);
+    };
+  }, [
+    connection.casparCG, state, getStateForApi,
+    playItem, pausePlayback, resumePlayback, stopPlayback,
+    nextItem, prevItem, togglePlaylistMode, toggleLoopMode, toggleLoopItem,
+    loadRundown, saveRundown, clearAllChannels,
+    addChannel, addLayer, deleteChannel, deleteLayer, executeMacro
+  ]);
+
+  // Broadcast state changes to API WebSocket clients
+  useEffect(() => {
+    if (!apiStatus.isRunning) return;
+
+    const { ipcRenderer } = window.require('electron');
+    // Throttle state broadcasts to avoid overwhelming clients
+    const timeoutId = setTimeout(() => {
+      ipcRenderer.send('api:broadcast-state', getStateForApi());
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [apiStatus.isRunning, state.channels, connection.isConnected, getStateForApi]);
+
+  // Auto-start API server if enabled in settings
+  useEffect(() => {
+    if (settings.apiEnabled && !apiStatus.isRunning) {
+      startApiServer(settings.apiPort);
+    } else if (!settings.apiEnabled && apiStatus.isRunning) {
+      stopApiServer();
+    }
+  }, [settings.apiEnabled, settings.apiPort]);
+
+  // ==================== End API Integration ====================
+
   const value = {
     state,
     setState,
@@ -2479,7 +2639,12 @@ export function AppProvider({ children }) {
     // CasparCG media functions
     refreshCasparMedia,
     refreshThumbnailList,
-    getCasparThumbnail
+    getCasparThumbnail,
+    // External API
+    apiStatus,
+    startApiServer,
+    stopApiServer,
+    getStateForApi
   };
 
   return (

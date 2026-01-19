@@ -69,7 +69,7 @@
 
 .preview-controls {
   position: absolute;
-  bottom: 8px;
+  bottom: 0;
   left: 8px;
   right: 8px;
   display: flex;
@@ -93,7 +93,7 @@
 }
 
 .btn-sm {
-  padding: 6px 12px;
+  /*padding: 6px 12px;*/
   font-size: 12px;
 }
 

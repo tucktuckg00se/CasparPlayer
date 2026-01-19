@@ -1,0 +1,120 @@
+.offset-timecode-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.offset-timecode-input.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.offset-timecode-input.compact {
+  gap: 2px;
+}
+
+.offset-sign-toggle {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.offset-sign-toggle:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-primary);
+}
+
+.offset-sign-toggle.positive {
+  color: var(--accent-secondary);
+}
+
+.offset-sign-toggle.negative {
+  color: var(--warning);
+  background: rgba(255, 152, 0, 0.1);
+  border-color: rgba(255, 152, 0, 0.3);
+}
+
+.offset-sign-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.offset-timecode-fields {
+  display: flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.offset-timecode-input:focus-within .offset-timecode-fields {
+  border-color: var(--accent-primary);
+}
+
+.offset-timecode-field {
+  width: 22px;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+  text-align: center;
+}
+
+.offset-timecode-field:focus {
+  outline: none;
+  background: rgba(0, 170, 136, 0.1);
+  border-radius: 2px;
+}
+
+.offset-timecode-field::placeholder {
+  color: var(--text-tertiary);
+}
+
+.offset-timecode-separator {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+}
+
+.offset-timecode-fps {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+/* Compact mode */
+.offset-timecode-input.compact .offset-sign-toggle {
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+}
+
+.offset-timecode-input.compact .offset-timecode-fields {
+  padding: 1px 2px;
+}
+
+.offset-timecode-input.compact .offset-timecode-field {
+  width: 18px;
+  font-size: 11px;
+  padding: 1px;
+}
+
+.offset-timecode-input.compact .offset-timecode-separator {
+  font-size: 11px;
+}

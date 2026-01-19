@@ -1,7 +1,11 @@
 // Macro Executor Service
-// Executes macro command sequences
+// Executes macro command sequences using the unified command handler
 
-import casparCommands from './casparCommands';
+import { executeCommand as executeUnifiedCommand, LEGACY_COMMAND_MAP } from './commandHandler';
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 export async function executeMacro(macro, casparCG, context = {}) {
   if (!macro || !macro.commands || macro.commands.length === 0) {
@@ -17,18 +21,21 @@ export async function executeMacro(macro, casparCG, context = {}) {
     }
 
     try {
-      // Check if this is a client-side command first (doesn't need CasparCG connection)
-      if (command.type && command.type.startsWith('CLIENT_')) {
-        const result = await executeClientCommand(command.type, command.channel, command.layer, command.params || {}, context);
-        results.push({ command, success: true, result });
-      } else {
-        // Server commands require CasparCG connection
-        if (!casparCG) {
-          throw new Error('Not connected to CasparCG');
-        }
-        const result = await executeCommand(command, casparCG, context);
-        results.push({ command, success: true, result });
-      }
+      // Build params object from command
+      const params = {
+        channel: command.channel,
+        layer: command.layer,
+        ...(command.params || {})
+      };
+
+      // Execute using unified command handler (handles legacy command type mapping)
+      const result = await executeUnifiedCommand(
+        command.type,
+        params,
+        { ...context, casparCG }
+      );
+
+      results.push({ command, success: result.success !== false, result });
 
       // Wait if delay is specified
       if (command.delay > 0) {
@@ -46,169 +53,6 @@ export async function executeMacro(macro, casparCG, context = {}) {
     results,
     macro: macro.name
   };
-}
-
-async function executeCommand(command, casparCG, context) {
-  const { type, channel, layer, params = {} } = command;
-
-  // Replace context variables in params
-  const resolvedParams = resolveParams(params, context);
-
-  // Handle client-side commands
-  if (type.startsWith('CLIENT_')) {
-    return await executeClientCommand(type, channel, layer, resolvedParams, context);
-  }
-
-  // Handle CasparCG commands
-  switch (type) {
-    case 'PLAY':
-      return await casparCommands.play(
-        casparCG,
-        channel,
-        layer,
-        resolvedParams.clip,
-        resolvedParams
-      );
-
-    case 'LOADBG':
-      return await casparCommands.loadBg(
-        casparCG,
-        channel,
-        layer,
-        resolvedParams.clip,
-        resolvedParams
-      );
-
-    case 'PAUSE':
-      return await casparCommands.pause(casparCG, channel, layer);
-
-    case 'RESUME':
-      return await casparCommands.resume(casparCG, channel, layer);
-
-    case 'STOP':
-      return await casparCommands.stop(casparCG, channel, layer);
-
-    case 'CLEAR':
-      return await casparCommands.clear(casparCG, channel, layer);
-
-    case 'CG_ADD':
-      return await casparCommands.cgAdd(
-        casparCG,
-        channel,
-        layer,
-        resolvedParams.template,
-        resolvedParams.playOnLoad ?? true,
-        resolvedParams.data || {}
-      );
-
-    case 'CG_PLAY':
-      return await casparCommands.cgPlay(casparCG, channel, layer);
-
-    case 'CG_STOP':
-      return await casparCommands.cgStop(casparCG, channel, layer);
-
-    case 'CG_UPDATE':
-      return await casparCommands.cgUpdate(
-        casparCG,
-        channel,
-        layer,
-        resolvedParams.data || {}
-      );
-
-    case 'CALL':
-      return await casparCommands.call(casparCG, channel, layer, resolvedParams);
-
-    case 'CUSTOM':
-      // Send raw AMCP command
-      if (resolvedParams.amcp) {
-        // Use executeCommand or cgDo for raw AMCP strings
-        // casparcg-connection v6.3.3 uses different method names
-        if (typeof casparCG.executeCommand === 'function') {
-          return await casparCG.executeCommand(resolvedParams.amcp);
-        } else if (typeof casparCG.cgDo === 'function') {
-          return await casparCG.cgDo(resolvedParams.amcp);
-        } else {
-          // Fallback: parse and execute via appropriate method
-          return await casparCommands.executeRawCommand(casparCG, resolvedParams.amcp);
-        }
-      }
-      throw new Error('Custom command requires amcp parameter');
-
-    default:
-      throw new Error(`Unknown command type: ${type}`);
-  }
-}
-
-// Execute client-side commands using app context
-async function executeClientCommand(type, channel, layer, params, context) {
-  const { appContext } = context;
-
-  if (!appContext) {
-    throw new Error('Client commands require app context');
-  }
-
-  switch (type) {
-    case 'CLIENT_TOGGLE_PLAYLIST_MODE':
-      appContext.togglePlaylistMode(channel, layer);
-      return { success: true };
-
-    case 'CLIENT_TOGGLE_LOOP_MODE':
-      appContext.toggleLoopMode(channel, layer);
-      return { success: true };
-
-    case 'CLIENT_TOGGLE_LOOP_ITEM':
-      appContext.toggleLoopItem(channel, layer);
-      return { success: true };
-
-    case 'CLIENT_ADD_CHANNEL':
-      appContext.addChannel();
-      return { success: true };
-
-    case 'CLIENT_ADD_LAYER':
-      appContext.addLayer(channel);
-      return { success: true };
-
-    case 'CLIENT_NEXT_ITEM':
-      await appContext.nextItem(channel, layer);
-      return { success: true };
-
-    case 'CLIENT_PREV_ITEM':
-      await appContext.prevItem(channel, layer);
-      return { success: true };
-
-    case 'CLIENT_LOAD_RUNDOWN':
-      if (params.rundownName && appContext.loadRundown) {
-        await appContext.loadRundown(params.rundownName);
-        return { success: true };
-      }
-      throw new Error('Load rundown requires rundownName parameter');
-
-    default:
-      throw new Error(`Unknown client command: ${type}`);
-  }
-}
-
-function resolveParams(params, context) {
-  const resolved = {};
-
-  for (const [key, value] of Object.entries(params)) {
-    if (typeof value === 'string' && value.startsWith('$')) {
-      // Variable reference
-      const varName = value.slice(1);
-      resolved[key] = context[varName] ?? value;
-    } else if (typeof value === 'object' && value !== null) {
-      // Nested object
-      resolved[key] = resolveParams(value, context);
-    } else {
-      resolved[key] = value;
-    }
-  }
-
-  return resolved;
-}
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export function createMacroTemplate() {

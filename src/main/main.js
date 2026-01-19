@@ -5,6 +5,7 @@ const mediaScanner = require('./mediaScanner');
 const thumbnailGenerator = require('./thumbnailGenerator');
 const oscService = require('./oscService');
 const streamRelay = require('./streamRelay');
+const apiServer = require('./apiServer');
 
 let mainWindow;
 let mediaWatcher = null;
@@ -479,7 +480,103 @@ ipcMain.handle('stream:getRelayStatus', async (event, channelId) => {
   return streamRelay.getRelayStatus(channelId);
 });
 
-// Cleanup stream relays on app quit
+// API Server management for external control (Bitfocus Companion, vMix, Stream Deck, etc.)
+ipcMain.handle('api:start', async (event, port) => {
+  try {
+    const result = await apiServer.start(port, {
+      // Handle incoming commands from API
+      onCommand: (command, params) => {
+        return new Promise((resolve, reject) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            // Generate unique request ID
+            const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+
+            // Set up one-time listener for the response
+            const responseHandler = (event, response) => {
+              if (response.requestId === requestId) {
+                ipcMain.removeListener('api:command-response', responseHandler);
+                if (response.success) {
+                  resolve(response.result);
+                } else {
+                  reject(new Error(response.error || 'Command failed'));
+                }
+              }
+            };
+            ipcMain.on('api:command-response', responseHandler);
+
+            // Send command to renderer
+            mainWindow.webContents.send('api:command', { command, params, requestId });
+
+            // Timeout after 10 seconds
+            setTimeout(() => {
+              ipcMain.removeListener('api:command-response', responseHandler);
+              reject(new Error('Command timeout'));
+            }, 10000);
+          } else {
+            reject(new Error('Application window not available'));
+          }
+        });
+      },
+      // Handle state requests from API
+      onStateRequest: () => {
+        return new Promise((resolve, reject) => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+
+            const responseHandler = (event, response) => {
+              if (response.requestId === requestId) {
+                ipcMain.removeListener('api:state-response', responseHandler);
+                resolve(response.state);
+              }
+            };
+            ipcMain.on('api:state-response', responseHandler);
+
+            mainWindow.webContents.send('api:state-request', { requestId });
+
+            // Timeout after 5 seconds
+            setTimeout(() => {
+              ipcMain.removeListener('api:state-response', responseHandler);
+              resolve(null);
+            }, 5000);
+          } else {
+            resolve(null);
+          }
+        });
+      }
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    console.error('Error starting API server:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('api:stop', async () => {
+  try {
+    await apiServer.stop();
+    return { success: true };
+  } catch (error) {
+    console.error('Error stopping API server:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('api:status', async () => {
+  return apiServer.getStatus();
+});
+
+// Broadcast state changes to API WebSocket clients
+ipcMain.on('api:broadcast-state', (event, state) => {
+  apiServer.broadcastState(state);
+});
+
+// Broadcast events to API WebSocket clients
+ipcMain.on('api:broadcast-event', (event, eventName, data) => {
+  apiServer.broadcastEvent(eventName, data);
+});
+
+// Cleanup on app quit
 app.on('will-quit', async () => {
+  await apiServer.stop();
   await streamRelay.stopAllRelays();
 });

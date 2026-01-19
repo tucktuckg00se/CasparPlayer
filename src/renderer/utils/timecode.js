@@ -85,3 +85,117 @@ export function calculateProgress(current, total) {
   if (!total || total <= 0) return 0;
   return Math.min(100, Math.max(0, (current / total) * 100));
 }
+
+// ==================== Macro Offset Utilities ====================
+
+/**
+ * Create a default offset object
+ * @returns {Object} Default offset with all zeros
+ */
+export function createDefaultOffset() {
+  return {
+    hours: 0,
+    minutes: 0,
+    seconds: 0,
+    frames: 0,
+    negative: false
+  };
+}
+
+/**
+ * Convert offset object to seconds using channel frame rate
+ * @param {Object} offset - The offset object { hours, minutes, seconds, frames, negative }
+ * @param {number} channelFrameRate - The channel's frame rate (e.g., 25, 30, 50, 60)
+ * @returns {number} Total seconds (negative if offset.negative is true)
+ */
+export function offsetToSeconds(offset, channelFrameRate = 25) {
+  if (!offset) return 0;
+
+  const { hours = 0, minutes = 0, seconds = 0, frames = 0, negative = false } = offset;
+  const totalSeconds = (hours * 3600) + (minutes * 60) + seconds + (frames / channelFrameRate);
+
+  return negative ? -totalSeconds : totalSeconds;
+}
+
+/**
+ * Convert seconds to offset object
+ * @param {number} totalSeconds - Seconds (can be negative)
+ * @param {number} channelFrameRate - The channel's frame rate
+ * @returns {Object} Offset object { hours, minutes, seconds, frames, negative }
+ */
+export function secondsToOffset(totalSeconds, channelFrameRate = 25) {
+  const negative = totalSeconds < 0;
+  const absSeconds = Math.abs(totalSeconds);
+
+  const hours = Math.floor(absSeconds / 3600);
+  const minutes = Math.floor((absSeconds % 3600) / 60);
+  const seconds = Math.floor(absSeconds % 60);
+  const frames = Math.round((absSeconds % 1) * channelFrameRate);
+
+  return { hours, minutes, seconds, frames, negative };
+}
+
+/**
+ * Convert offset object to total frames
+ * @param {Object} offset - The offset object
+ * @param {number} channelFrameRate - The channel's frame rate
+ * @returns {number} Total frames (negative if offset.negative is true)
+ */
+export function offsetToFrames(offset, channelFrameRate = 25) {
+  return Math.round(offsetToSeconds(offset, channelFrameRate) * channelFrameRate);
+}
+
+/**
+ * Format offset object as timecode string
+ * @param {Object} offset - The offset object
+ * @returns {string} Formatted string like "-00:01:30:15" or "00:00:05:00"
+ */
+export function formatOffset(offset) {
+  if (!offset) return '00:00:00:00';
+
+  const { hours = 0, minutes = 0, seconds = 0, frames = 0, negative = false } = offset;
+  const sign = negative ? '-' : '';
+
+  return sign + [
+    hours.toString().padStart(2, '0'),
+    minutes.toString().padStart(2, '0'),
+    seconds.toString().padStart(2, '0'),
+    frames.toString().padStart(2, '0')
+  ].join(':');
+}
+
+/**
+ * Parse timecode string to offset object
+ * @param {string} timecodeString - String like "-00:01:30:15" or "00:00:05:00"
+ * @returns {Object} Offset object
+ */
+export function parseOffsetString(timecodeString) {
+  if (!timecodeString) return createDefaultOffset();
+
+  const negative = timecodeString.startsWith('-');
+  const cleanString = timecodeString.replace(/^-/, '');
+  const parts = cleanString.split(':').map(Number);
+
+  if (parts.length === 4) {
+    return {
+      hours: parts[0] || 0,
+      minutes: parts[1] || 0,
+      seconds: parts[2] || 0,
+      frames: parts[3] || 0,
+      negative
+    };
+  }
+
+  return createDefaultOffset();
+}
+
+/**
+ * Check if offset is zero (no delay)
+ * @param {Object} offset - The offset object
+ * @returns {boolean} True if offset is effectively zero
+ */
+export function isOffsetZero(offset) {
+  if (!offset) return true;
+  const { hours = 0, minutes = 0, seconds = 0, frames = 0 } = offset;
+  return hours === 0 && minutes === 0 && seconds === 0 && frames === 0;
+}
