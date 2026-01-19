@@ -144,7 +144,8 @@ export function createOscUpdateHandler(setState) {
               case 'paused':
                 return {
                   ...l,
-                  isPlaying: !update.isPaused
+                  isPlaying: !update.isPaused,
+                  isPaused: update.isPaused  // FIX: Also update isPaused flag
                 };
 
               case 'producer_type':

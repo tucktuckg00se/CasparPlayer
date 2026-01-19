@@ -4,7 +4,7 @@ import { DRAG_TYPES, parseDragData } from './DragDropProvider';
 import PlaylistItem from './PlaylistItem';
 import './Playlist.css';
 
-export default function Playlist({ items, currentIndex, channelId, layerId, expanded = false, selectedItems = [], lastSelectedIndex = null }) {
+export default function Playlist({ items, currentIndex, channelId, layerId, expanded = false, selectedItems = [], lastSelectedIndex = null, isLayerPlaying = false }) {
   const { addMediaToPlaylist, reorderPlaylistItems, selectPlaylistItems, deleteSelectedItems, undoDelete } = useApp();
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [lastClickIndex, setLastClickIndex] = useState(null);
@@ -37,9 +37,11 @@ export default function Playlist({ items, currentIndex, channelId, layerId, expa
   }, [channelId, layerId, selectedItems, items, deleteSelectedItems, undoDelete, selectPlaylistItems]);
 
   // Handle item click with modifiers for multi-select
+  // Single-click ONLY sets blue selection, never green (active)
+  // Green (active) only happens when play button is clicked or double-click
   const handleItemClick = (itemId, index, e) => {
     if (e.ctrlKey || e.metaKey) {
-      // Ctrl+Click: toggle selection
+      // Ctrl+Click: toggle selection for multi-select
       selectPlaylistItems(channelId, layerId, [itemId], 'toggle');
     } else if (e.shiftKey && lastClickIndex !== null) {
       // Shift+Click: range select
@@ -48,7 +50,7 @@ export default function Playlist({ items, currentIndex, channelId, layerId, expa
       const rangeIds = items.slice(start, end + 1).map(item => item.id);
       selectPlaylistItems(channelId, layerId, rangeIds);
     } else {
-      // Regular click: replace selection
+      // Regular click: only blue selection, never changes active (green)
       selectPlaylistItems(channelId, layerId, [itemId]);
       setLastClickIndex(index);
     }

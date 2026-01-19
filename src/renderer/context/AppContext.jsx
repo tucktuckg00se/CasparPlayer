@@ -29,7 +29,9 @@ const initialState = {
     sidebarTab: 'files',
     previewSize: 400
   },
-  activeStreams: {}  // { [channelId]: { streamUrl, relayPort, isActive } }
+  activeStreams: {},  // { [channelId]: { streamUrl, relayPort, isActive } }
+  autoConnectTrigger: 0,  // Increment to signal auto-connect for previews
+  autoConnectChannelId: null  // Which channel to auto-connect: null, 'all', or specific channelId
 };
 
 export function AppProvider({ children }) {
@@ -59,13 +61,29 @@ export function AppProvider({ children }) {
     previewScale: '384:216',
     previewPreset: 'ultrafast',
     previewTune: 'zerolatency',
-    previewAudioBitrate: '128k'
+    previewAudioBitrate: '128k',
+    // Session and preview settings
+    autoLoadLastSession: true,  // Auto-load last session on startup
+    autoConnectPreviews: false  // Auto-connect previews when loading rundowns
   });
   const [rundowns, setRundowns] = useState([]);
   const oscListenerRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
   const imageTimersRef = useRef({}); // Track image auto-advance timers by channel-layer key
   const lastTimeRef = useRef({}); // Track last time updates for completion detection
+
+  // Refs to track current state for the quit handler (avoids stale closure)
+  const settingsRef = useRef(settings);
+  const stateRef = useRef(state);
+
+  // Keep refs updated when state changes
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Load saved configuration
   useEffect(() => {
@@ -229,9 +247,12 @@ export function AppProvider({ children }) {
                   };
 
                 case 'paused':
+                  // Only update isPaused from OSC - don't touch isPlaying
+                  // isPlaying is controlled by user actions (play/stop commands)
+                  // This prevents OSC from incorrectly setting isPlaying=true when layer is empty
                   return {
                     ...l,
-                    isPlaying: !update.isPaused
+                    isPaused: update.isPaused
                   };
 
                 case 'producer_type':
@@ -253,11 +274,68 @@ export function AppProvider({ children }) {
   }, [autoAdvanceNext]);
 
   // Save settings on app close (only settings, not channel state)
+  // Uses refs to access current state values, avoiding stale closure issues
   useEffect(() => {
     const { ipcRenderer } = window.require('electron');
 
     const handleBeforeQuit = async () => {
-      await saveSettings();
+      // Use refs to get current values, not stale closure values
+      const currentSettings = settingsRef.current;
+      const currentState = stateRef.current;
+
+      // Save current settings
+      await ipcRenderer.invoke('config:save', {
+        connection: {
+          host: connection.host,
+          port: connection.port,
+          oscPort: connection.oscPort,
+          previewUrl: connection.previewUrl
+        },
+        settings: currentSettings
+      });
+
+      // Auto-save current rundown as LastSession, or delete it if empty
+      if (currentState.channels.length > 0) {
+        // Inline the save logic to use current state from ref
+        const channelsToSave = currentState.channels.map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          expanded: channel.expanded,
+          layers: channel.layers.map(layer => ({
+            id: layer.id,
+            playlist: layer.playlist.map(item => ({
+              id: item.id,
+              type: item.type,
+              name: item.name,
+              path: item.path,
+              relativePath: item.relativePath,
+              duration: item.duration,
+              resolution: item.resolution,
+              frameRate: item.frameRate,
+              inPointFrames: item.inPointFrames,
+              outPointFrames: item.outPointFrames,
+              inPoint: item.inPoint,
+              outPoint: item.outPoint
+            })),
+            currentIndex: layer.currentIndex,
+            playlistMode: layer.playlistMode,
+            loopMode: layer.loopMode,
+            loopItem: layer.loopItem,
+            selectedItems: layer.selectedItems || []
+          }))
+        }));
+
+        const rundownData = {
+          channels: channelsToSave,
+          ui: { expandedChannel: currentState.ui.expandedChannel }
+        };
+
+        await ipcRenderer.invoke('rundown:save', '__LastSession__', rundownData);
+      } else {
+        // Delete LastSession if closing with no channels
+        await ipcRenderer.invoke('rundown:delete', '__LastSession__');
+      }
+
       ipcRenderer.send('app:state-saved');
     };
 
@@ -265,7 +343,17 @@ export function AppProvider({ children }) {
 
     // Also save on browser beforeunload for extra safety
     const handleBeforeUnload = () => {
-      saveSettings();
+      // Sync save using current ref values
+      const currentSettings = settingsRef.current;
+      ipcRenderer.invoke('config:save', {
+        connection: {
+          host: connection.host,
+          port: connection.port,
+          oscPort: connection.oscPort,
+          previewUrl: connection.previewUrl
+        },
+        settings: currentSettings
+      });
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
@@ -273,7 +361,7 @@ export function AppProvider({ children }) {
       ipcRenderer.removeListener('app:before-quit', handleBeforeQuit);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, []);
+  }, [connection.host, connection.port, connection.oscPort, connection.previewUrl]);
 
   // Heartbeat to detect connection loss
   useEffect(() => {
@@ -444,6 +532,44 @@ export function AppProvider({ children }) {
               }
             }));
           }
+        }
+      }
+
+      // Auto-load LastSession if setting enabled
+      if (config.settings?.autoLoadLastSession !== false) {
+        try {
+          const lastSessionResult = await ipcRenderer.invoke('rundown:load', '__LastSession__');
+          if (lastSessionResult.success && lastSessionResult.data) {
+            const channelsWithState = (lastSessionResult.data.channels || []).map(channel => ({
+              ...channel,
+              layers: channel.layers.map(layer => ({
+                ...layer,
+                isPlaying: false,
+                isPaused: false,
+                currentTime: 0,
+                totalTime: 0,
+                currentFrame: 0,
+                totalFrames: 0,
+                deletedItems: layer.deletedItems || [],
+                playlist: layer.playlist.map(item => ({
+                  ...item,
+                  selected: false,
+                  playing: false
+                }))
+              }))
+            }));
+
+            setState(prev => ({
+              ...prev,
+              channels: channelsWithState,
+              ui: { ...prev.ui, ...lastSessionResult.data.ui },
+              // Trigger auto-connect for ALL channels if setting enabled
+              autoConnectTrigger: config.settings?.autoConnectPreviews ? (prev.autoConnectTrigger || 0) + 1 : prev.autoConnectTrigger,
+              autoConnectChannelId: config.settings?.autoConnectPreviews ? 'all' : null
+            }));
+          }
+        } catch (err) {
+          // No LastSession to restore - this is fine
         }
       }
     }
@@ -637,18 +763,22 @@ export function AppProvider({ children }) {
 
   // Channel Management
   const addChannel = useCallback(() => {
+    const newChannelId = state.channels.length + 1;
     const newChannel = {
-      id: state.channels.length + 1,
-      name: `Channel ${state.channels.length + 1}`,
+      id: newChannelId,
+      name: `Channel ${newChannelId}`,
       layers: [createNewLayer(1)],
       expanded: false
     };
 
     setState(prev => ({
       ...prev,
-      channels: [...prev.channels, newChannel]
+      channels: [...prev.channels, newChannel],
+      // Trigger auto-connect for ONLY the new channel if setting enabled
+      autoConnectTrigger: settings.autoConnectPreviews ? (prev.autoConnectTrigger || 0) + 1 : prev.autoConnectTrigger,
+      autoConnectChannelId: settings.autoConnectPreviews ? newChannelId : null
     }));
-  }, [state.channels]);
+  }, [state.channels, settings.autoConnectPreviews]);
 
   const deleteChannel = useCallback((channelId) => {
     setState(prev => ({
@@ -1442,12 +1572,16 @@ export function AppProvider({ children }) {
               ...ch,
               layers: ch.layers.map(l => {
                 if (l.id === layerId) {
+                  // Get the currently playing item to make it the selection
+                  const playingItem = l.currentIndex >= 0 ? l.playlist[l.currentIndex] : null;
                   return {
                     ...l,
                     isPlaying: false,
                     isPaused: false,
                     currentTime: 0,
-                    playlist: l.playlist.map(item => ({ ...item, playing: false }))
+                    currentIndex: -1,  // Reset active (green) state
+                    selectedItems: playingItem ? [playingItem.id] : [],  // Make stopped item the selection (blue)
+                    playlist: l.playlist.map(item => ({ ...item, playing: false, selected: false }))
                   };
                 }
                 return l;
@@ -1796,12 +1930,15 @@ export function AppProvider({ children }) {
         ui: {
           ...prev.ui,
           ...result.data.ui
-        }
+        },
+        // Trigger auto-connect for ALL channels if setting enabled
+        autoConnectTrigger: settings.autoConnectPreviews ? (prev.autoConnectTrigger || 0) + 1 : prev.autoConnectTrigger,
+        autoConnectChannelId: settings.autoConnectPreviews ? 'all' : null
       }));
       return { success: true };
     }
     return result;
-  }, []);
+  }, [settings.autoConnectPreviews]);
 
   const deleteRundown = useCallback(async (name) => {
     const { ipcRenderer } = window.require('electron');

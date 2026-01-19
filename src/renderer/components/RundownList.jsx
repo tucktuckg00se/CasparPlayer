@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import './RundownList.css';
 
@@ -9,18 +9,8 @@ export default function RundownList() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(null);
   const [error, setError] = useState(null);
-  const inputRef = useRef(null);
-
-  // Focus input with a small delay when save dialog opens
-  useEffect(() => {
-    if (showSaveDialog && inputRef.current) {
-      const timeout = setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 50);
-      return () => clearTimeout(timeout);
-    }
-  }, [showSaveDialog]);
+  const [showNewConfirm, setShowNewConfirm] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // stores rundown name to delete
 
   const handleSaveClick = () => {
     setShowSaveDialog(true);
@@ -64,17 +54,21 @@ export default function RundownList() {
     }
   };
 
-  const handleDelete = async (name) => {
-    if (!window.confirm(`Delete rundown "${name}"?`)) return;
+  const handleDelete = (name) => {
+    setDeleteConfirm(name);
+  };
 
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
     try {
-      const result = await deleteRundown(name);
+      const result = await deleteRundown(deleteConfirm);
       if (!result.success) {
         setError(result.error || 'Failed to delete rundown');
       }
     } catch (err) {
       setError(err.message);
     }
+    setDeleteConfirm(null);
   };
 
   const formatDate = (dateString) => {
@@ -84,9 +78,12 @@ export default function RundownList() {
   };
 
   const handleNewRundown = () => {
-    if (window.confirm('Create a new rundown? This will clear all current channels and playlists.')) {
-      clearAllChannels();
-    }
+    setShowNewConfirm(true);
+  };
+
+  const confirmNewRundown = () => {
+    clearAllChannels();
+    setShowNewConfirm(false);
   };
 
   return (
@@ -129,9 +126,9 @@ export default function RundownList() {
         <div className="save-dialog">
           <form onSubmit={handleSave}>
             <input
-              ref={inputRef}
               type="text"
               className="input"
+              autoFocus
               value={rundownName}
               onChange={(e) => setRundownName(e.target.value)}
               placeholder="Enter rundown name..."
@@ -148,8 +145,36 @@ export default function RundownList() {
         </div>
       )}
 
+      {showNewConfirm && (
+        <div className="save-dialog confirm-dialog">
+          <p>Create a new rundown? This will clear all current channels and playlists.</p>
+          <div className="save-dialog-actions">
+            <button type="button" className="btn" onClick={() => setShowNewConfirm(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-primary" onClick={confirmNewRundown}>
+              Create New
+            </button>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <div className="save-dialog confirm-dialog">
+          <p>Delete rundown "{deleteConfirm}"?</p>
+          <div className="save-dialog-actions">
+            <button type="button" className="btn" onClick={() => setDeleteConfirm(null)}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-danger" onClick={confirmDelete}>
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="rundown-items">
-        {rundowns.length === 0 ? (
+        {rundowns.filter(r => r.id !== '__LastSession__').length === 0 ? (
           <div className="rundown-empty">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" opacity="0.3">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" strokeWidth="2"/>
@@ -158,7 +183,7 @@ export default function RundownList() {
             <p className="text-sm text-tertiary">Click "Save Current" to save your current setup</p>
           </div>
         ) : (
-          rundowns.map(rundown => (
+          rundowns.filter(r => r.id !== '__LastSession__').map(rundown => (
             <div key={rundown.id} className="rundown-item">
               <div className="rundown-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">

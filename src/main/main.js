@@ -27,6 +27,9 @@ const cachePath = path.join(userDataPath, 'cache', 'thumbnails');
 // Initialize thumbnail generator with cache directory
 thumbnailGenerator.setCacheDirectory(cachePath);
 
+// Track quit state to prevent double-save
+let isQuitting = false;
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -57,7 +60,25 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
-  // Handle window close
+  // Handle window close - intercept to save state first
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && mainWindow && !mainWindow.isDestroyed()) {
+      event.preventDefault();
+      isQuitting = true;
+      mainWindow.webContents.send('app:before-quit');
+      // Wait for save confirmation then close
+      ipcMain.once('app:state-saved', () => {
+        mainWindow.destroy();
+      });
+      // Timeout fallback - close after 2 seconds even if save doesn't complete
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.destroy();
+        }
+      }, 2000);
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -78,8 +99,7 @@ app.on('activate', () => {
   }
 });
 
-// Save state before quitting
-let isQuitting = false;
+// Save state before quitting (e.g., from menu quit or Cmd+Q)
 app.on('before-quit', (event) => {
   if (!isQuitting && mainWindow && !mainWindow.isDestroyed()) {
     event.preventDefault();

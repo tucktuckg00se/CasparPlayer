@@ -27,9 +27,20 @@ export default function LayerControls({ layer, channelId }) {
     if (layer.isPaused) {
       // Resume from paused state
       resumePlayback(channelId, layer.id);
-    } else if (!layer.isPlaying && hasItems) {
-      // Start fresh playback
-      const index = layer.currentIndex >= 0 ? layer.currentIndex : 0;
+    } else if (hasItems) {
+      // Find the selected item (blue) to play
+      // selectedItems contains item IDs, find the index of the first selected item
+      let index = 0;
+      if (layer.selectedItems && layer.selectedItems.length > 0) {
+        const selectedId = layer.selectedItems[0];
+        const selectedIndex = layer.playlist.findIndex(item => item.id === selectedId);
+        if (selectedIndex >= 0) {
+          index = selectedIndex;
+        }
+      } else if (layer.currentIndex >= 0) {
+        // Fall back to currentIndex if nothing selected
+        index = layer.currentIndex;
+      }
       playItem(channelId, layer.id, index);
     }
   };

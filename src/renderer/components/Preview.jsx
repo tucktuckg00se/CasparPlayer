@@ -1,10 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import mpegts from 'mpegts.js';
 import { useApp } from '../context/AppContext';
 import './Preview.css';
 
 export default function Preview({ channelId, expanded = false }) {
-  const { connection, settings, setStreamActive, setStreamInactive } = useApp();
+  const { connection, settings, setStreamActive, setStreamInactive, state } = useApp();
   const videoRef = useRef(null);
   const playerRef = useRef(null);
 
@@ -12,6 +12,27 @@ export default function Preview({ channelId, expanded = false }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [streamUrl, setStreamUrl] = useState('');
+  const autoConnectTriggeredRef = useRef(0);
+
+  // Auto-connect when rundown loaded with setting enabled
+  useEffect(() => {
+    // Check if we should auto-connect this specific channel
+    const shouldConnect = state.autoConnectChannelId === 'all' || state.autoConnectChannelId === channelId;
+
+    if (state.autoConnectTrigger > 0 &&
+        state.autoConnectTrigger !== autoConnectTriggeredRef.current &&
+        shouldConnect &&
+        !isConnected &&
+        !isConnecting &&
+        connection.isConnected &&
+        settings.autoConnectPreviews) {
+      autoConnectTriggeredRef.current = state.autoConnectTrigger;
+      // Small delay to ensure state is settled
+      setTimeout(() => {
+        handleConnect();
+      }, 100);
+    }
+  }, [state.autoConnectTrigger, state.autoConnectChannelId, channelId, isConnected, isConnecting, connection.isConnected, settings.autoConnectPreviews]);
 
   // Execute raw AMCP command
   const executeStreamCommand = async (command) => {

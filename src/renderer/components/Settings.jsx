@@ -237,6 +237,19 @@ export default function Settings({ onClose }) {
                 </div>
               </div>
               <span className="input-hint">These settings affect the fmp4 streaming from CasparCG to the preview window</span>
+
+              <h3 className="settings-section-title" style={{ marginTop: '20px' }}>Auto-Connect</h3>
+              <div className="input-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={editedSettings.autoConnectPreviews || false}
+                    onChange={(e) => handleChange('autoConnectPreviews', e.target.checked)}
+                  />
+                  Auto-connect previews when loading rundowns
+                </label>
+                <span className="input-hint">Automatically start live preview streams for all channels</span>
+              </div>
             </div>
           )}
 
@@ -278,6 +291,19 @@ export default function Settings({ onClose }) {
                   )}
                 </div>
                 <span className="input-hint">The folder will be auto-loaded on startup</span>
+              </div>
+
+              <h3 className="settings-section-title" style={{ marginTop: '20px' }}>Session</h3>
+              <div className="input-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={editedSettings.autoLoadLastSession !== false}
+                    onChange={(e) => handleChange('autoLoadLastSession', e.target.checked)}
+                  />
+                  Auto-load last session on startup
+                </label>
+                <span className="input-hint">Restore channels and playlists from previous session</span>
               </div>
             </div>
           )}
