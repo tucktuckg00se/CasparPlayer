@@ -4,19 +4,48 @@ import Channel from './Channel';
 import './ChannelsContainer.css';
 
 export default function ChannelsContainer() {
-  const { state, addChannel } = useApp();
+  const { state, addChannel, addLayer, toggleExpandChannel } = useApp();
+  const expandedChannelId = state.ui.expandedChannel;
+  const isExpanded = expandedChannelId !== null;
 
   return (
-    <div className="channels-container">
+    <div className={`channels-container ${isExpanded ? 'has-expanded' : ''}`}>
       <div className="channels-header">
-        <h2 className="channels-title">Channels</h2>
-        <button className="btn btn-primary" onClick={addChannel}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <line x1="12" y1="5" x2="12" y2="19" strokeWidth="2" strokeLinecap="round"/>
-            <line x1="5" y1="12" x2="19" y2="12" strokeWidth="2" strokeLinecap="round"/>
-          </svg>
-          Add Channel
-        </button>
+        {isExpanded ? (
+          <>
+            <button
+              className="btn"
+              onClick={() => toggleExpandChannel(null)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <line x1="19" y1="12" x2="5" y2="12" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <polyline points="12 19 5 12 12 5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Back to All Channels
+            </button>
+            <h2 className="channels-title">
+              {state.channels.find(ch => ch.id === expandedChannelId)?.name || 'Channel'}
+            </h2>
+            <button className="btn btn-primary" onClick={() => addLayer(expandedChannelId)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <line x1="12" y1="5" x2="12" y2="19" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="5" y1="12" x2="19" y2="12" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              Add Layer
+            </button>
+          </>
+        ) : (
+          <>
+            <h2 className="channels-title">Channels</h2>
+            <button className="btn btn-primary" onClick={addChannel}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <line x1="12" y1="5" x2="12" y2="19" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="5" y1="12" x2="19" y2="12" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              Add Channel
+            </button>
+          </>
+        )}
       </div>
 
       <div className="channels-grid">
@@ -32,7 +61,12 @@ export default function ChannelsContainer() {
           </div>
         ) : (
           state.channels.map(channel => (
-            <Channel key={channel.id} channel={channel} />
+            <Channel
+              key={channel.id}
+              channel={channel}
+              isExpanded={expandedChannelId === channel.id}
+              isHidden={isExpanded && expandedChannelId !== channel.id}
+            />
           ))
         )}
       </div>

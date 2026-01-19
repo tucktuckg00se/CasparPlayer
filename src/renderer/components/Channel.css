@@ -165,3 +165,77 @@
   gap: 12px;
   justify-content: center;
 }
+
+/* Hidden channel (when another channel is expanded) */
+.channel-hidden {
+  display: none;
+}
+
+/* Expanded channel styles */
+.channel-expanded {
+  width: 100% !important;
+  height: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.channel-expanded .channel-preview,
+.channel-preview-expanded {
+  width: 100%;
+  /* Height is set dynamically via inline style */
+  border-radius: var(--radius-lg);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+}
+
+.channel-expanded .channel-layers,
+.channel-layers-expanded {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 0 0 20px 0;
+}
+
+/* Preview resize handle */
+.channel-preview-expanded {
+  position: relative;
+}
+
+.preview-resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 12px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: background 0.15s ease;
+  z-index: 5;
+}
+
+.preview-resize-handle:hover,
+.preview-resize-handle.resizing {
+  background: rgba(0, 255, 136, 0.1);
+}
+
+.resize-handle-bar {
+  width: 60px;
+  height: 4px;
+  background: var(--border-color);
+  border-radius: 2px;
+  transition: background 0.15s ease, width 0.15s ease;
+}
+
+.preview-resize-handle:hover .resize-handle-bar,
+.preview-resize-handle.resizing .resize-handle-bar {
+  background: var(--accent-primary);
+  width: 80px;
+}

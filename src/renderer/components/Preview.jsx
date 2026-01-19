@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import mpegts from 'mpegts.js';
 import { useApp } from '../context/AppContext';
 import './Preview.css';
 
 export default function Preview({ channelId, expanded = false }) {
-  const { connection, settings } = useApp();
+  const { connection, settings, setStreamActive, setStreamInactive } = useApp();
   const videoRef = useRef(null);
   const playerRef = useRef(null);
 
@@ -12,35 +12,6 @@ export default function Preview({ channelId, expanded = false }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [streamUrl, setStreamUrl] = useState('');
-
-  // Cleanup mpegts.js player
-  const cleanupPlayer = useCallback(() => {
-    console.log(`[Preview ${channelId}] Cleaning up mpegts player`);
-
-    if (playerRef.current) {
-      try {
-        playerRef.current.pause();
-        playerRef.current.unload();
-        playerRef.current.detachMediaElement();
-        playerRef.current.destroy();
-      } catch (err) {
-        console.warn(`[Preview ${channelId}] Error during cleanup:`, err);
-      }
-      playerRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.src = '';
-      videoRef.current.load();
-    }
-  }, [channelId]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      cleanupPlayer();
-    };
-  }, [cleanupPlayer]);
 
   // Execute raw AMCP command
   const executeStreamCommand = async (command) => {
@@ -59,7 +30,7 @@ export default function Preview({ channelId, expanded = false }) {
     }
   };
 
-  // Connect to stream
+  // Connect to stream (starts new relay and creates player)
   const handleConnect = async () => {
     if (!connection.casparCG || !connection.isConnected) return;
 
@@ -85,11 +56,14 @@ export default function Preview({ channelId, expanded = false }) {
       console.log(`[Preview ${channelId}] Stream URL: ${relayUrl}`);
 
       // Build and send the ADD STREAM command to CasparCG with MPEGTS format
-      // Note: CasparCG's ffmpeg consumer ignores most options (ac, ar, preset, tune, etc.)
-      // We use hasAudio:false in mpegts.js since CasparCG sends 16-channel HE-AAC which browsers can't decode
       const scale = settings.previewScale || '384:216';
+      const preset = settings.previewPreset || 'ultrafast';
+      const tune = settings.previewTune || 'zerolatency';
+      // Quality: 0=worst (CRF 51), 100=best (CRF 18)
+      const crf = Math.round(51 - (settings.previewQuality || 50) * 0.33);
+
       const casparUrl = relayUrl.replace('/stream', '/stream.ts');
-      const streamCommand = `ADD ${channelId} STREAM "${casparUrl}" -format mpegts -codec:v libx264 -crf:v 25 -tune:v zerolatency -preset:v ultrafast -filter:v scale=${scale.replace(':', ':')} -filter:a "pan=stereo|c0=FL|c1=FR"`;
+      const streamCommand = `ADD ${channelId} STREAM "${casparUrl}" -format mpegts -codec:v libx264 -crf:v ${crf} -tune:v ${tune} -preset:v ${preset} -filter:v scale=${scale.replace(':', ':')} -filter:a "pan=stereo|c0=FL|c1=FR"`;
 
       console.log('[Preview] Sending MPEGTS stream command:', streamCommand);
 
@@ -123,8 +97,6 @@ export default function Preview({ channelId, expanded = false }) {
         seekType: 'range',
       });
 
-      playerRef.current = player;
-
       // Handle player events
       player.on(mpegts.Events.ERROR, (errorType, errorDetail, errorInfo) => {
         console.error(`[Preview ${channelId}] mpegts error:`, errorType, errorDetail, errorInfo);
@@ -153,15 +125,19 @@ export default function Preview({ channelId, expanded = false }) {
       try {
         await player.play();
         console.log(`[Preview ${channelId}] Playback started`);
-        setIsConnected(true);
-        setIsConnecting(false);
       } catch (playErr) {
         console.warn(`[Preview ${channelId}] Autoplay failed, trying muted:`, playErr);
         videoRef.current.muted = true;
         await player.play();
-        setIsConnected(true);
-        setIsConnecting(false);
       }
+
+      // Store player in ref (component never unmounts now)
+      playerRef.current = player;
+      // Store metadata in context
+      setStreamActive(channelId, relayUrl, actualPort);
+
+      setIsConnected(true);
+      setIsConnecting(false);
 
     } catch (err) {
       console.error('Failed to connect:', err);
@@ -169,12 +145,11 @@ export default function Preview({ channelId, expanded = false }) {
       setIsConnecting(false);
 
       // Cleanup on error
-      cleanupPlayer();
       await ipcRenderer.invoke('stream:stopRelay', channelId);
     }
   };
 
-  // Disconnect from stream
+  // Disconnect from stream (manual disconnect - destroys player and stops relay)
   const handleDisconnect = async () => {
     const { ipcRenderer } = window.require('electron');
 
@@ -189,11 +164,30 @@ export default function Preview({ channelId, expanded = false }) {
         }
       }
 
-      // Cleanup player
-      cleanupPlayer();
+      // Destroy the player completely
+      if (playerRef.current) {
+        try {
+          playerRef.current.pause();
+          playerRef.current.unload();
+          playerRef.current.detachMediaElement();
+          playerRef.current.destroy();
+        } catch (err) {
+          console.warn(`[Preview ${channelId}] Error destroying player:`, err);
+        }
+        playerRef.current = null;
+      }
+
+      // Clear video element
+      if (videoRef.current) {
+        videoRef.current.src = '';
+        videoRef.current.load();
+      }
 
       // Stop the stream relay
       await ipcRenderer.invoke('stream:stopRelay', channelId);
+
+      // Clear stream from context
+      setStreamInactive(channelId);
 
     } catch (err) {
       console.error('Error disconnecting:', err);

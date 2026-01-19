@@ -39,8 +39,9 @@ export default function Settings({ onClose }) {
       if (folderPath) {
         // Update local state
         setEditedSettings(prev => ({ ...prev, mediaFolderPath: folderPath }));
-        // Auto-save settings immediately
-        await updateSettings({ ...editedSettings, mediaFolderPath: folderPath });
+        // Auto-save just the mediaFolderPath - updateSettings merges with current settings
+        // This avoids stale closure issues with editedSettings
+        await updateSettings({ mediaFolderPath: folderPath });
         // Also scan and set the media folder
         const result = await ipcRenderer.invoke('media:scanFolder', folderPath);
         if (result.success) {

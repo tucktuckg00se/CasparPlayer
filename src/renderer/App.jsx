@@ -5,7 +5,6 @@ import Settings from './components/Settings';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import ChannelsContainer from './components/ChannelsContainer';
-import ExpandedChannel from './components/ExpandedChannel';
 import { AppProvider, useApp } from './context/AppContext';
 
 function AppContent() {
@@ -101,11 +100,7 @@ function AppContent() {
         <Sidebar />
 
         <div className="content-area">
-          {state.ui.currentView === 'multi' ? (
-            <ChannelsContainer />
-          ) : (
-            <ExpandedChannel />
-          )}
+          <ChannelsContainer />
         </div>
       </div>
     </div>

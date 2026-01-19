@@ -28,7 +28,8 @@ const initialState = {
     expandedChannel: null,
     sidebarTab: 'files',
     previewSize: 400
-  }
+  },
+  activeStreams: {}  // { [channelId]: { streamUrl, relayPort, isActive } }
 };
 
 export function AppProvider({ children }) {
@@ -78,18 +79,14 @@ export function AppProvider({ children }) {
     const { ipcRenderer } = window.require('electron');
 
     const handleOscMessage = (event, message) => {
-      // Debug: Log when renderer receives OSC message from main
-      console.log('[AppContext] Received OSC message from main process:', message?.parsed?.type || 'unknown type');
       processOscMessage(message, handleOscUpdate);
     };
 
     ipcRenderer.on('osc:message', handleOscMessage);
     oscListenerRef.current = handleOscMessage;
-    console.log('[AppContext] OSC message listener registered');
 
     return () => {
       ipcRenderer.removeListener('osc:message', handleOscMessage);
-      console.log('[AppContext] OSC message listener removed');
     };
   }, []);
 
@@ -161,90 +158,106 @@ export function AppProvider({ children }) {
     const { type, channel, layer } = update;
     const layerKey = `${channel}-${layer}`;
 
-    // Debug: Log OSC update being processed
-    console.log(`[AppContext] handleOscUpdate: type=${type}, channel=${channel}, layer=${layer}`, update);
+    setState(prev => {
+      // Find the channel and layer to get current playlist item duration
+      const ch = prev.channels.find(c => c.id === channel);
+      const l = ch?.layers.find(la => la.id === layer);
 
-    // Track time updates for completion detection
-    if (type === 'time') {
-      const lastTime = lastTimeRef.current[layerKey];
-      const timeRemaining = update.totalTime - update.currentTime;
-
-      // Detect completion: total time > 0 and remaining time is very small
-      if (update.totalTime > 0 && timeRemaining <= 0.1 && timeRemaining >= 0) {
-        // Only trigger once per completion
-        if (!lastTime || lastTime.completed !== true) {
-          lastTimeRef.current[layerKey] = { ...update, completed: true };
-          // Trigger auto-advance
-          autoAdvanceNext(channel, layer);
+      // Get totalTime from OSC or fall back to current playlist item's duration
+      let effectiveTotalTime = update.totalTime;
+      if (type === 'time' && (effectiveTotalTime === null || effectiveTotalTime === undefined)) {
+        // Use the current playlist item's duration from metadata
+        if (l && l.currentIndex >= 0 && l.playlist[l.currentIndex]) {
+          const currentItem = l.playlist[l.currentIndex];
+          effectiveTotalTime = currentItem.metadata?.duration || currentItem.duration || l.totalTime || 0;
+        } else {
+          effectiveTotalTime = l?.totalTime || 0;
         }
-      } else {
-        lastTimeRef.current[layerKey] = { ...update, completed: false };
       }
-    }
 
-    setState(prev => ({
-      ...prev,
-      channels: prev.channels.map(ch => {
-        if (ch.id !== channel) return ch;
+      // Track time updates for completion detection
+      if (type === 'time' && effectiveTotalTime > 0) {
+        const lastTime = lastTimeRef.current[layerKey];
+        const timeRemaining = effectiveTotalTime - update.currentTime;
 
-        return {
-          ...ch,
-          layers: ch.layers.map(l => {
-            if (l.id !== layer) return l;
+        // Detect completion: total time > 0 and remaining time is very small
+        if (timeRemaining <= 0.1 && timeRemaining >= 0) {
+          // Only trigger once per completion
+          if (!lastTime || lastTime.completed !== true) {
+            lastTimeRef.current[layerKey] = { ...update, totalTime: effectiveTotalTime, completed: true };
+            // Trigger auto-advance (schedule outside setState to avoid nested updates)
+            setTimeout(() => autoAdvanceNext(channel, layer), 0);
+          }
+        } else {
+          lastTimeRef.current[layerKey] = { ...update, totalTime: effectiveTotalTime, completed: false };
+        }
+      }
 
-            switch (type) {
-              case 'time':
-                return {
-                  ...l,
-                  currentTime: update.currentTime,
-                  totalTime: update.totalTime
-                };
+      return {
+        ...prev,
+        channels: prev.channels.map(ch => {
+          if (ch.id !== channel) return ch;
 
-              case 'frame':
-                return {
-                  ...l,
-                  currentFrame: update.currentFrame,
-                  totalFrames: update.totalFrames
-                };
+          return {
+            ...ch,
+            layers: ch.layers.map(l => {
+              if (l.id !== layer) return l;
 
-              case 'paused':
-                return {
-                  ...l,
-                  isPlaying: !update.isPaused
-                };
+              switch (type) {
+                case 'time':
+                  // Get totalTime from OSC or playlist item duration
+                  let totalTime = update.totalTime;
+                  if (totalTime === null || totalTime === undefined) {
+                    if (l.currentIndex >= 0 && l.playlist[l.currentIndex]) {
+                      const currentItem = l.playlist[l.currentIndex];
+                      totalTime = currentItem.metadata?.duration || currentItem.duration || l.totalTime || 0;
+                    } else {
+                      totalTime = l.totalTime || 0;
+                    }
+                  }
+                  return {
+                    ...l,
+                    currentTime: update.currentTime,
+                    totalTime: totalTime
+                  };
 
-              case 'producer_type':
-                // Track if current item is an image for duration timeout
-                return {
-                  ...l,
-                  currentProducerType: update.producerType,
-                  isImage: update.isImage
-                };
+                case 'frame':
+                  return {
+                    ...l,
+                    currentFrame: update.currentFrame,
+                    totalFrames: update.totalFrames ?? l.totalFrames
+                  };
 
-              default:
-                return l;
-            }
-          })
-        };
-      })
-    }));
+                case 'paused':
+                  return {
+                    ...l,
+                    isPlaying: !update.isPaused
+                  };
+
+                case 'producer_type':
+                  // Track if current item is an image for duration timeout
+                  return {
+                    ...l,
+                    currentProducerType: update.producerType,
+                    isImage: update.isImage
+                  };
+
+                default:
+                  return l;
+              }
+            })
+          };
+        })
+      };
+    });
   }, [autoAdvanceNext]);
 
-  // Auto-save state periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      saveState();
-    }, 30000); // Every 30 seconds
-
-    return () => clearInterval(interval);
-  }, [state]);
-
-  // Save state on app close
+  // Save settings on app close (only settings, not channel state)
   useEffect(() => {
     const { ipcRenderer } = window.require('electron');
 
     const handleBeforeQuit = async () => {
-      await saveState();
+      await saveSettings();
       ipcRenderer.send('app:state-saved');
     };
 
@@ -252,7 +265,7 @@ export function AppProvider({ children }) {
 
     // Also save on browser beforeunload for extra safety
     const handleBeforeUnload = () => {
-      saveState();
+      saveSettings();
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
@@ -378,17 +391,21 @@ export function AppProvider({ children }) {
     });
   }, [state.channels, connection.casparCG, connection.isConnected]);
 
+  // Load config: Only loads connection settings and app settings (not channel state)
+  // Channel state is loaded separately via rundowns
   const loadConfig = async () => {
     const { ipcRenderer } = window.require('electron');
     const config = await ipcRenderer.invoke('config:load');
 
     if (config) {
+      // Load connection settings
       if (config.connection) {
         setConnection(prev => ({ ...prev, ...config.connection }));
       }
-      if (config.state) {
-        setState(prev => ({ ...prev, ...config.state }));
-      }
+      // NOTE: config.state (channels) is NOT loaded here - app starts with empty channels
+      // User should explicitly load a rundown if they want to restore channel state
+
+      // Load app settings
       if (config.settings) {
         setSettings(prev => ({ ...prev, ...config.settings }));
         // Scan and load media folder if path is saved
@@ -432,7 +449,9 @@ export function AppProvider({ children }) {
     }
   };
 
-  const saveState = async () => {
+  // Save settings only (connection + app settings, NOT channel state)
+  // Channel state is saved separately via rundowns
+  const saveSettings = async () => {
     const { ipcRenderer } = window.require('electron');
     await ipcRenderer.invoke('config:save', {
       connection: {
@@ -441,11 +460,7 @@ export function AppProvider({ children }) {
         oscPort: connection.oscPort,
         previewUrl: connection.previewUrl
       },
-      state: {
-        channels: state.channels,
-        ui: state.ui
-      },
-      settings
+      settings: settings
     });
   };
 
@@ -454,7 +469,7 @@ export function AppProvider({ children }) {
     const updatedSettings = { ...settings, ...newSettings };
     setSettings(updatedSettings);
 
-    // Save settings immediately
+    // Save settings immediately (only connection + settings, not channel state)
     await ipcRenderer.invoke('config:save', {
       connection: {
         host: connection.host,
@@ -462,15 +477,11 @@ export function AppProvider({ children }) {
         oscPort: connection.oscPort,
         previewUrl: connection.previewUrl
       },
-      state: {
-        channels: state.channels,
-        ui: state.ui
-      },
       settings: updatedSettings
     });
 
     return updatedSettings;
-  }, [settings, connection, state.channels, state.ui]);
+  }, [settings, connection]);
 
   const loadMacros = async () => {
     const { ipcRenderer } = window.require('electron');
@@ -1578,6 +1589,39 @@ export function AppProvider({ children }) {
     }));
   }, []);
 
+  const setExpandedPreviewHeight = useCallback((height) => {
+    setState(prev => ({
+      ...prev,
+      ui: {
+        ...prev.ui,
+        previewSize: Math.max(200, Math.min(800, height)) // Clamp between 200-800px
+      }
+    }));
+  }, []);
+
+  // Stream tracking for preview persistence across view changes
+  // Player instances are stored in playerStore.js (module-level Map) to persist across unmount/remount
+  const setStreamActive = useCallback((channelId, streamUrl, relayPort) => {
+    setState(prev => ({
+      ...prev,
+      activeStreams: {
+        ...prev.activeStreams,
+        [channelId]: { streamUrl, relayPort, isActive: true }
+      }
+    }));
+  }, []);
+
+  const setStreamInactive = useCallback((channelId) => {
+    setState(prev => {
+      const newActiveStreams = { ...prev.activeStreams };
+      delete newActiveStreams[channelId];
+      return {
+        ...prev,
+        activeStreams: newActiveStreams
+      };
+    });
+  }, []);
+
   // Macro management
   const createMacro = useCallback(async (macro) => {
     const { ipcRenderer } = window.require('electron');
@@ -1667,11 +1711,49 @@ export function AppProvider({ children }) {
     setRundowns(list);
   };
 
+  // Save rundown: Saves channel/layer CONFIGURATION only, not runtime state
+  // Runtime state (isPlaying, isPaused, currentTime, etc.) comes from CasparCG via OSC
   const saveRundown = useCallback(async (name) => {
     const { ipcRenderer } = window.require('electron');
+
+    // Strip runtime state from channels/layers - only save configuration
+    const channelsToSave = state.channels.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      expanded: channel.expanded,
+      layers: channel.layers.map(layer => ({
+        id: layer.id,
+        playlist: layer.playlist.map(item => ({
+          // Save playlist item configuration
+          id: item.id,
+          type: item.type,
+          name: item.name,
+          path: item.path,
+          relativePath: item.relativePath,
+          duration: item.duration,
+          resolution: item.resolution,
+          frameRate: item.frameRate,
+          inPointFrames: item.inPointFrames,
+          outPointFrames: item.outPointFrames,
+          inPoint: item.inPoint,
+          outPoint: item.outPoint
+          // NOT saving: selected, playing - these are runtime state
+        })),
+        currentIndex: layer.currentIndex,
+        playlistMode: layer.playlistMode,
+        loopMode: layer.loopMode,
+        loopItem: layer.loopItem,
+        selectedItems: layer.selectedItems || []
+        // NOT saving: isPlaying, isPaused, currentTime, totalTime, currentFrame, totalFrames
+        // These are runtime state from CasparCG via OSC
+      }))
+    }));
+
     const rundownData = {
-      channels: state.channels,
-      ui: state.ui
+      channels: channelsToSave,
+      ui: {
+        expandedChannel: state.ui.expandedChannel
+      }
     };
     const result = await ipcRenderer.invoke('rundown:save', name, rundownData);
     if (result.success) {
@@ -1680,13 +1762,37 @@ export function AppProvider({ children }) {
     return result;
   }, [state.channels, state.ui]);
 
+  // Load rundown: Loads channel/layer configuration, initializes all layers as stopped
+  // Playing state will only come from CasparCG via OSC - user must manually trigger playback
   const loadRundown = useCallback(async (name) => {
     const { ipcRenderer } = window.require('electron');
     const result = await ipcRenderer.invoke('rundown:load', name);
     if (result.success && result.data) {
+      // Initialize runtime state for all loaded channels/layers
+      const channelsWithState = (result.data.channels || []).map(channel => ({
+        ...channel,
+        layers: channel.layers.map(layer => ({
+          ...layer,
+          // Initialize runtime state to stopped
+          isPlaying: false,
+          isPaused: false,
+          currentTime: 0,
+          totalTime: 0,
+          currentFrame: 0,
+          totalFrames: 0,
+          deletedItems: layer.deletedItems || [],
+          // Initialize playlist items as not playing/selected
+          playlist: layer.playlist.map(item => ({
+            ...item,
+            selected: false,
+            playing: false
+          }))
+        }))
+      }));
+
       setState(prev => ({
         ...prev,
-        channels: result.data.channels || [],
+        channels: channelsWithState,
         ui: {
           ...prev.ui,
           ...result.data.ui
@@ -1762,7 +1868,10 @@ export function AppProvider({ children }) {
     selectMediaFile,
     toggleFolderExpand,
     setSidebarTab,
-    saveState,
+    setExpandedPreviewHeight,
+    setStreamActive,
+    setStreamInactive,
+    saveSettings,
     loadMacros,
     createMacro,
     updateMacro,

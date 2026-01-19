@@ -1,7 +1,8 @@
 // OSC Message Handler for CasparCG time updates
+// Reference: https://github.com/CasparCG/help/wiki/OSC-Protocol
 
-// Debug mode - set to true for verbose logging
-const DEBUG_OSC_HANDLER = true;
+// Debug mode - set to false for production (reduces CPU usage from logging at 30fps)
+const DEBUG_OSC_HANDLER = false;
 
 export function processOscMessage(message, updateCallback) {
   const { address, args, parsed } = message;
@@ -25,33 +26,36 @@ export function processOscMessage(message, updateCallback) {
 
   switch (type) {
     case 'time':
-      // CasparCG sends time as two floats: [current, total]
-      if (args.length >= 2) {
+      // CasparCG OSC Protocol sends time as a single float: elapsed seconds
+      // Some versions may send two values [current, total] - handle both
+      if (args.length >= 1) {
         const currentTime = parseFloat(args[0]) || 0;
-        const totalTime = parseFloat(args[1]) || 0;
+        // If second arg exists, use it as totalTime; otherwise null (use metadata)
+        const totalTime = args.length >= 2 ? parseFloat(args[1]) || null : null;
 
         updateCallback({
           type: 'time',
           channel,
           layer,
           currentTime,
-          totalTime
+          totalTime  // May be null - AppContext will use playlist item duration
         });
       }
       break;
 
     case 'frame':
-      // CasparCG sends frame as two ints: [current, total]
-      if (args.length >= 2) {
+      // CasparCG OSC Protocol sends frame as a single int: frame count
+      // Some versions may send two values [current, total] - handle both
+      if (args.length >= 1) {
         const currentFrame = parseInt(args[0]) || 0;
-        const totalFrames = parseInt(args[1]) || 0;
+        const totalFrames = args.length >= 2 ? parseInt(args[1]) || null : null;
 
         updateCallback({
           type: 'frame',
           channel,
           layer,
           currentFrame,
-          totalFrames
+          totalFrames  // May be null
         });
       }
       break;
@@ -105,6 +109,8 @@ export function processOscMessage(message, updateCallback) {
 }
 
 export function createOscUpdateHandler(setState) {
+  // Note: This function is provided for backwards compatibility
+  // The main OSC handling is done in AppContext.handleOscUpdate which has access to playlist data
   return (update) => {
     const { type, channel, layer } = update;
 
@@ -120,17 +126,19 @@ export function createOscUpdateHandler(setState) {
 
             switch (type) {
               case 'time':
+                // Get totalTime from OSC or keep existing (from playlist item metadata)
+                const totalTime = update.totalTime ?? l.totalTime;
                 return {
                   ...l,
                   currentTime: update.currentTime,
-                  totalTime: update.totalTime
+                  totalTime: totalTime
                 };
 
               case 'frame':
                 return {
                   ...l,
                   currentFrame: update.currentFrame,
-                  totalFrames: update.totalFrames
+                  totalFrames: update.totalFrames ?? l.totalFrames
                 };
 
               case 'paused':
@@ -157,17 +165,6 @@ export function createOscUpdateHandler(setState) {
         };
       })
     }));
-
-    // Handle auto-advance when item finishes
-    if (type === 'time' && update.totalTime > 0) {
-      const timeRemaining = update.totalTime - update.currentTime;
-
-      // Check if we're at the end (within 0.1 seconds)
-      if (timeRemaining <= 0.1) {
-        // This will be handled by the context's auto-advance logic
-        // which monitors OSC updates
-      }
-    }
   };
 }
 
