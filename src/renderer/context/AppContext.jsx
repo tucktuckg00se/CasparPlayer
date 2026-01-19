@@ -767,8 +767,15 @@ export function AppProvider({ children }) {
             }
           }
         }
+
+        // If we got here but version is still "Unknown", the server didn't respond properly
+        if (serverInfo.version === 'Unknown') {
+          throw new Error('Server did not respond to VERSION command');
+        }
       } catch (versionErr) {
-        console.log('VERSION command failed:', versionErr);
+        console.error('VERSION command failed - server not responding:', versionErr);
+        ccg.disconnect();
+        throw new Error('Failed to verify CasparCG connection: ' + versionErr.message);
       }
 
       setConnection(prev => ({
