@@ -8,10 +8,11 @@
 
 ---
 
-## Screenshot
+***Fair warning, this app was vibe-coded. It mostly likely has a lot of bad programming and maybe some libraries that are outdated. It does work though, so that is pretty rad***
 
-<!-- Add a screenshot of your application here -->
-<!-- ![CasparPlayer Screenshot](docs/screenshot.png) -->
+---
+
+![CasparPlayer Screenshot](screenshot.png)
 
 *A modern, dark-themed interface for controlling CasparCG server instances with multi-channel support, live preview, and comprehensive playlist management.*
 
