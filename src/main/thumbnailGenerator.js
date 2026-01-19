@@ -65,13 +65,28 @@ async function getVideoMetadata(filePath) {
         const videoStream = data.streams?.find(s => s.codec_type === 'video');
         const audioStream = data.streams?.find(s => s.codec_type === 'audio');
 
+        // Safely parse frame rate from format like "30000/1001" or "25/1"
+        let frameRate = 0;
+        if (videoStream?.r_frame_rate) {
+          const parts = videoStream.r_frame_rate.split('/');
+          if (parts.length === 2) {
+            const numerator = parseFloat(parts[0]);
+            const denominator = parseFloat(parts[1]);
+            if (denominator !== 0) {
+              frameRate = numerator / denominator;
+            }
+          } else {
+            frameRate = parseFloat(videoStream.r_frame_rate) || 0;
+          }
+        }
+
         resolve({
           duration: parseFloat(data.format?.duration) || 0,
           width: videoStream?.width || 0,
           height: videoStream?.height || 0,
           resolution: videoStream ? `${videoStream.width}x${videoStream.height}` : '',
           codec: videoStream?.codec_name || '',
-          frameRate: videoStream?.r_frame_rate ? eval(videoStream.r_frame_rate) : 0,
+          frameRate,
           bitrate: parseInt(data.format?.bit_rate) || 0,
           hasAudio: !!audioStream
         });

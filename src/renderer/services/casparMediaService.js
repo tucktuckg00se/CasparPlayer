@@ -14,17 +14,32 @@ function mapCasparType(casparType) {
   }
 }
 
+// Validate and normalize framerate value
+function normalizeFrameRate(rawFrameRate) {
+  if (rawFrameRate === null || rawFrameRate === undefined) return null;
+
+  const fps = parseFloat(rawFrameRate);
+
+  // Validate it's a reasonable framerate (between 1 and 120)
+  if (isNaN(fps) || fps <= 0 || fps > 120) return null;
+
+  // Round to 2 decimal places for cleaner display
+  return Math.round(fps * 100) / 100;
+}
+
 // Convert CasparCG ClipInfo to app's metadata format
 export function convertClipInfoToMetadata(clipInfo) {
   if (!clipInfo) return null;
 
-  const duration = clipInfo.framerate > 0
-    ? clipInfo.frames / clipInfo.framerate
+  const frameRate = normalizeFrameRate(clipInfo.framerate);
+
+  const duration = frameRate && clipInfo.frames > 0
+    ? clipInfo.frames / frameRate
     : 0;
 
   return {
     duration,
-    frameRate: clipInfo.framerate,
+    frameRate, // Will be null if invalid, allowing fallback logic to work properly
     frameCount: clipInfo.frames,
     size: clipInfo.size,
     type: mapCasparType(clipInfo.type),

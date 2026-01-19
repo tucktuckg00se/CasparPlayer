@@ -301,6 +301,42 @@ export async function executeRawCommand(casparCG, commandString) {
   }
 }
 
+// Parse a single CLS line with correct framerate calculation
+// Format: "clip/name" TYPE size datetime frames numerator/denominator
+// FPS = denominator / numerator (e.g., 100/2997 -> 2997/100 = 29.97 fps)
+function parseClsLine(line) {
+  // Match: "name" TYPE size datetime frames num/den
+  const match = line.match(/^"([^"]+)"\s+(\w+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\/(\d+)/);
+  if (!match) return null;
+
+  const [, clip, type, size, datetime, frames, numerator, denominator] = match;
+
+  // Calculate correct framerate: FPS = denominator / numerator
+  const numVal = parseInt(numerator, 10);
+  const denVal = parseInt(denominator, 10);
+  const framerate = numVal > 0 ? denVal / numVal : 0;
+
+  return {
+    clip,
+    type,
+    size: parseInt(size, 10),
+    datetime: parseInt(datetime, 10),
+    frames: parseInt(frames, 10),
+    framerate
+  };
+}
+
+// Fix framerate for library-parsed clip data (fallback)
+// If framerate > 120, assume it's the raw denominator and try heuristic fixes
+function fixClipFramerate(clip) {
+  if (!clip?.framerate || (clip.framerate > 0 && clip.framerate <= 120)) {
+    return clip;
+  }
+  // Heuristic: common values like 2997 -> 29.97, 5994 -> 59.94
+  // These are typically denominator values where numerator was 100
+  return { ...clip, framerate: clip.framerate / 100 };
+}
+
 // CLS - List media files with metadata
 export async function cls(casparCG, subDirectory = null) {
   if (!casparCG) {
@@ -312,11 +348,74 @@ export async function cls(casparCG, subDirectory = null) {
     const result = await casparCG.cls(params);
     if (result?.request) {
       const response = await result.request;
-      return response.data || [];
+
+      // Log raw response for debugging framerate issues
+      console.log('CLS response:', response);
+
+      // If response.message contains raw text, parse it ourselves for correct framerate
+      if (response.message && typeof response.message === 'string') {
+        const lines = response.message.split('\n').filter(l => l.trim());
+        const parsed = lines.map(parseClsLine).filter(Boolean);
+        if (parsed.length > 0) {
+          console.log('CLS parsed from raw message:', parsed.slice(0, 3));
+          return parsed;
+        }
+      }
+
+      // Fallback to library-parsed data with framerate fix
+      const data = response.data || [];
+      return data.map(fixClipFramerate);
     }
     return [];
   } catch (error) {
     console.error('CLS command failed:', error);
+    throw error;
+  }
+}
+
+// Parse a single THUMBNAIL LIST line
+// Format: "clip/name" datetime size
+function parseThumbnailListLine(line) {
+  const match = line.match(/^"([^"]+)"\s+(\d+T\d+)\s+(\d+)/);
+  if (!match) return null;
+
+  const [, clip, datetime, size] = match;
+  return {
+    clip,
+    datetime,
+    size: parseInt(size, 10)
+  };
+}
+
+// THUMBNAIL LIST - Get list of available thumbnails
+export async function thumbnailList(casparCG) {
+  if (!casparCG) {
+    throw new Error('Not connected to CasparCG');
+  }
+
+  try {
+    const result = await casparCG.thumbnailList({});
+    if (result?.request) {
+      const response = await result.request;
+
+      console.log('THUMBNAIL LIST response:', response);
+
+      // Parse raw message if available
+      if (response.message && typeof response.message === 'string') {
+        const lines = response.message.split('\n').filter(l => l.trim());
+        const parsed = lines.map(parseThumbnailListLine).filter(Boolean);
+        if (parsed.length > 0) {
+          console.log('Thumbnails parsed from raw message:', parsed.length, 'items');
+          return parsed;
+        }
+      }
+
+      // Fallback to library-parsed data
+      return response.data || [];
+    }
+    return [];
+  } catch (error) {
+    console.error('THUMBNAIL LIST command failed:', error);
     throw error;
   }
 }
@@ -328,14 +427,33 @@ export async function thumbnailRetrieve(casparCG, filename) {
   }
 
   try {
-    const result = await casparCG.thumbnailRetrieve({ filename });
+    // Ensure filename is quoted for AMCP command (required for paths with spaces)
+    const quotedFilename = filename.includes(' ') && !filename.startsWith('"')
+      ? `"${filename}"`
+      : filename;
+
+    console.log('THUMBNAIL RETRIEVE:', quotedFilename);
+    const result = await casparCG.thumbnailRetrieve({ filename: quotedFilename });
     if (result?.request) {
       const response = await result.request;
-      return response.data || null;
+      console.log('THUMBNAIL RETRIEVE response:', response);
+
+      // The thumbnail data might be in response.data or response.message
+      if (response.data) {
+        return response.data;
+      }
+
+      // If data is in message (raw base64 string)
+      if (response.message && typeof response.message === 'string') {
+        // Remove any whitespace/newlines from base64 data
+        return response.message.trim();
+      }
+
+      return null;
     }
     return null;
   } catch (error) {
-    console.error('Thumbnail retrieve failed:', error);
+    console.error('Thumbnail retrieve failed for', filename, ':', error);
     throw error;
   }
 }
@@ -347,14 +465,21 @@ export async function thumbnailGenerate(casparCG, filename) {
   }
 
   try {
-    const result = await casparCG.thumbnailGenerate({ filename });
+    // Ensure filename is quoted for AMCP command (required for paths with spaces)
+    const quotedFilename = filename.includes(' ') && !filename.startsWith('"')
+      ? `"${filename}"`
+      : filename;
+
+    console.log('THUMBNAIL GENERATE:', quotedFilename);
+    const result = await casparCG.thumbnailGenerate({ filename: quotedFilename });
     if (result?.request) {
-      await result.request;
+      const response = await result.request;
+      console.log('THUMBNAIL GENERATE response:', response);
       return true;
     }
     return false;
   } catch (error) {
-    console.error('Thumbnail generate failed:', error);
+    console.error('Thumbnail generate failed for', filename, ':', error);
     throw error;
   }
 }
@@ -385,15 +510,34 @@ export async function info(casparCG, channel = null, layer = null) {
   }
 }
 
-// Parse frame rate from format string like "720p5000" or "1080i2997"
+// Parse frame rate from format string like "720p5000", "1080i2997", "720p50", etc.
 function parseFrameRateFromFormat(format) {
   if (!format) return null;
-  const match = format.match(/(\d{4})$/);
-  if (match) {
-    return parseInt(match[1], 10) / 100; // 5000 -> 50, 2997 -> 29.97
+
+  // Try 4-digit format first (e.g., "5000", "2997", "5994", "2398")
+  const match4 = format.match(/[ip](\d{4})$/i);
+  if (match4) {
+    return parseInt(match4[1], 10) / 100; // 5000 -> 50, 2997 -> 29.97
   }
+
+  // Try 2-digit format (e.g., "720p50", "1080i25")
+  const match2 = format.match(/[ip](\d{2})$/i);
+  if (match2) {
+    return parseInt(match2[1], 10); // 50 -> 50, 25 -> 25
+  }
+
+  // Try extracting any trailing digits after resolution marker
+  const matchAny = format.match(/[ip](\d+)$/i);
+  if (matchAny) {
+    const num = parseInt(matchAny[1], 10);
+    // If > 100, assume it's in hundredths (like 2997 = 29.97)
+    return num > 100 ? num / 100 : num;
+  }
+
+  // Legacy format names
   if (format.toUpperCase().includes('PAL')) return 25;
   if (format.toUpperCase().includes('NTSC')) return 29.97;
+
   return null;
 }
 
@@ -457,6 +601,7 @@ export default {
   cgUpdate,
   executeRawCommand,
   cls,
+  thumbnailList,
   thumbnailRetrieve,
   thumbnailGenerate,
   info,

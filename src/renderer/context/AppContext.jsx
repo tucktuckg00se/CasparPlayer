@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { CasparCG } from 'casparcg-connection';
 import { v4 as uuidv4 } from 'uuid';
-import casparCommands, { cls, thumbnailRetrieve, info, parseChannelInfo } from '../services/casparCommands';
+import casparCommands, { cls, thumbnailList, thumbnailRetrieve, thumbnailGenerate, info, parseChannelInfo } from '../services/casparCommands';
 import { processOscMessage } from '../services/oscHandler';
 import { executeMacro as runMacro } from '../services/macroExecutor';
 import { convertClipInfoToMetadata, localPathToCasparClip, findCasparMetadata } from '../services/casparMediaService';
@@ -816,7 +816,7 @@ export function AppProvider({ children }) {
 
       console.log('Connected to CasparCG:', serverInfo);
 
-      // Auto-refresh CasparCG media list and channel frame rates after connection
+      // Auto-refresh CasparCG media list, thumbnails, and channel frame rates after connection
       setTimeout(async () => {
         try {
           const mediaList = await cls(ccg);
@@ -832,6 +832,14 @@ export function AppProvider({ children }) {
           }));
         } catch (error) {
           console.warn('Auto-refresh CasparCG media failed:', error);
+        }
+
+        // Fetch available thumbnails
+        try {
+          const thumbList = await thumbnailList(ccg);
+          console.log('THUMBNAIL LIST returned', thumbList.length, 'thumbnails');
+        } catch (error) {
+          console.warn('Failed to fetch thumbnail list:', error);
         }
 
         // Fetch channel info (frame rate, resolution) for all existing channels
@@ -2005,19 +2013,74 @@ export function AppProvider({ children }) {
     }
   }, [connection.casparCG, connection.isConnected]);
 
+  // Track failed thumbnail attempts to avoid retry storms
+  const failedThumbnailsRef = useRef(new Set());
+  // Cache of available thumbnails from THUMBNAIL LIST
+  const availableThumbnailsRef = useRef(null);
+
+  // Refresh the list of available thumbnails from CasparCG
+  const refreshThumbnailList = useCallback(async () => {
+    if (!connection.casparCG || !connection.isConnected) {
+      return [];
+    }
+
+    try {
+      const thumbList = await thumbnailList(connection.casparCG);
+      availableThumbnailsRef.current = thumbList;
+      console.log('Loaded thumbnail list:', thumbList.length, 'thumbnails available');
+      return thumbList;
+    } catch (error) {
+      console.warn('Failed to load thumbnail list:', error);
+      return [];
+    }
+  }, [connection.casparCG, connection.isConnected]);
+
   // Get CasparCG thumbnail for a clip (with caching)
   const getCasparThumbnail = useCallback(async (clipName) => {
     if (!connection.casparCG || !connection.isConnected || !clipName) {
       return null;
     }
 
-    // Check cache first
-    if (state.casparMedia.thumbnails[clipName]) {
-      return state.casparMedia.thumbnails[clipName];
+    // Normalize clip name - remove file extension if present for CasparCG lookup
+    // CasparCG clip names are NOT case-sensitive but we preserve case for matching
+    const normalizedClipName = clipName.replace(/\.[^/.]+$/, '');
+
+    // Check cache first (use functional approach to avoid stale closure)
+    let cachedThumbnail = null;
+    setState(prev => {
+      // Try exact match first, then case-insensitive
+      cachedThumbnail = prev.casparMedia.thumbnails[normalizedClipName] ||
+                        prev.casparMedia.thumbnails[normalizedClipName.toUpperCase()];
+      return prev; // No state change, just reading
+    });
+    if (cachedThumbnail) {
+      return cachedThumbnail;
+    }
+
+    // Skip if we've already failed to get this thumbnail
+    const cacheKey = normalizedClipName.toUpperCase();
+    if (failedThumbnailsRef.current.has(cacheKey)) {
+      return null;
     }
 
     try {
-      const base64Data = await thumbnailRetrieve(connection.casparCG, clipName);
+      console.log('Fetching thumbnail for clip:', normalizedClipName);
+
+      // First try to retrieve existing thumbnail
+      let base64Data = await thumbnailRetrieve(connection.casparCG, normalizedClipName);
+
+      // If no thumbnail exists, try to generate it first then retrieve
+      if (!base64Data) {
+        try {
+          await thumbnailGenerate(connection.casparCG, normalizedClipName);
+          // Wait a moment for generation to complete
+          await new Promise(resolve => setTimeout(resolve, 500));
+          base64Data = await thumbnailRetrieve(connection.casparCG, normalizedClipName);
+        } catch (genError) {
+          console.warn('Thumbnail generation failed for', normalizedClipName, genError);
+        }
+      }
+
       if (base64Data) {
         // Convert to data URL and cache
         const dataUrl = `data:image/png;base64,${base64Data}`;
@@ -2028,19 +2091,24 @@ export function AppProvider({ children }) {
             ...prev.casparMedia,
             thumbnails: {
               ...prev.casparMedia.thumbnails,
-              [clipName]: dataUrl
+              [cacheKey]: dataUrl
             }
           }
         }));
 
         return dataUrl;
+      } else {
+        // Mark as failed to avoid retrying
+        console.log('No thumbnail data returned for:', normalizedClipName);
+        failedThumbnailsRef.current.add(cacheKey);
       }
     } catch (error) {
-      console.warn('Failed to retrieve thumbnail for', clipName, error);
+      console.warn('Failed to retrieve thumbnail for', normalizedClipName, error);
+      failedThumbnailsRef.current.add(cacheKey);
     }
 
     return null;
-  }, [connection.casparCG, connection.isConnected, state.casparMedia.thumbnails]);
+  }, [connection.casparCG, connection.isConnected]);
 
   // Toggle folder expand/collapse in media tree
   const toggleFolderExpand = useCallback((folderId) => {
@@ -2399,6 +2467,7 @@ export function AppProvider({ children }) {
     clearAllChannels,
     // CasparCG media functions
     refreshCasparMedia,
+    refreshThumbnailList,
     getCasparThumbnail
   };
 
