@@ -339,3 +339,52 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Macro Attachment Badges */
+.macro-badge {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  cursor: pointer;
+  z-index: 5;
+  transition: all var(--transition);
+  opacity: 0.9;
+}
+
+.macro-badge:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.macro-badge-start {
+  left: -3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.macro-badge-start:hover {
+  transform: translateY(-50%) scale(1.1);
+}
+
+.macro-badge-end {
+  right: -3px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.macro-badge-end:hover {
+  transform: translateY(-50%) scale(1.1);
+}
+
+.playlist-item.has-start-macro {
+  padding-left: 16px;
+}
+
+.playlist-item.has-end-macro {
+  padding-right: 16px;
+}
+

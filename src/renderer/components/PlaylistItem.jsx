@@ -18,10 +18,12 @@ export default function PlaylistItem({
   channelFrameRate,
   onItemClick
 }) {
-  const { removePlaylistItem, playItem, updateItemDuration, updateItemInOutPoints, updateItemMetadata } = useApp();
+  const { removePlaylistItem, playItem, updateItemDuration, updateItemInOutPoints, updateItemMetadata, removeMacroFromItem, getMacroById } = useApp();
   const isMacro = item.type === 'macro';
   const isImage = item.type === 'image';
   const isVideo = item.type === 'video';
+  const hasStartMacro = !!item.startMacro;
+  const hasEndMacro = !!item.endMacro;
   const [showDurationEditor, setShowDurationEditor] = useState(false);
   const [showInOutEditor, setShowInOutEditor] = useState(false);
   const [inPointFrames, setInPointFrames] = useState(item.inPointFrames ?? null);
@@ -126,15 +128,53 @@ export default function PlaylistItem({
     setShowInOutEditor(!showInOutEditor);
   };
 
+  // Get macro color for badge
+  const getStartMacroColor = () => {
+    if (!item.startMacro) return null;
+    const macro = getMacroById(item.startMacro.macroId);
+    return macro?.color || '#ff6432';
+  };
+
+  const getEndMacroColor = () => {
+    if (!item.endMacro) return null;
+    const macro = getMacroById(item.endMacro.macroId);
+    return macro?.color || '#ff6432';
+  };
+
+  // Handle removing attached macros
+  const handleRemoveStartMacro = (e) => {
+    e.stopPropagation();
+    removeMacroFromItem(channelId, layerId, item.id, 'start');
+  };
+
+  const handleRemoveEndMacro = (e) => {
+    e.stopPropagation();
+    removeMacroFromItem(channelId, layerId, item.id, 'end');
+  };
+
   return (
     <div
-      className={`playlist-item ${isCurrent ? 'current' : ''} ${isPlaying ? 'playing' : ''} ${isMacro ? 'macro' : ''} ${isSelected ? 'selected' : ''}`}
+      className={`playlist-item ${isCurrent ? 'current' : ''} ${isPlaying ? 'playing' : ''} ${isMacro ? 'macro' : ''} ${isSelected ? 'selected' : ''} ${hasStartMacro ? 'has-start-macro' : ''} ${hasEndMacro ? 'has-end-macro' : ''}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
+      {/* Start Macro Badge */}
+      {hasStartMacro && (
+        <div
+          className="macro-badge macro-badge-start"
+          style={{ backgroundColor: getStartMacroColor() }}
+          title={`Start macro: ${getMacroById(item.startMacro.macroId)?.name || 'Unknown'}`}
+          onClick={handleRemoveStartMacro}
+        >
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </div>
+      )}
+
       <span className="item-index">{index + 1}</span>
 
       <div className="item-icon">
@@ -293,6 +333,20 @@ export default function PlaylistItem({
           <span></span>
           <span></span>
           <span></span>
+        </div>
+      )}
+
+      {/* End Macro Badge */}
+      {hasEndMacro && (
+        <div
+          className="macro-badge macro-badge-end"
+          style={{ backgroundColor: getEndMacroColor() }}
+          title={`End macro: ${getMacroById(item.endMacro.macroId)?.name || 'Unknown'}`}
+          onClick={handleRemoveEndMacro}
+        >
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+          </svg>
         </div>
       )}
     </div>

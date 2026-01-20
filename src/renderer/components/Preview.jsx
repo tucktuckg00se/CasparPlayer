@@ -7,12 +7,75 @@ export default function Preview({ channelId, expanded = false }) {
   const { connection, settings, setStreamActive, setStreamInactive, state } = useApp();
   const videoRef = useRef(null);
   const playerRef = useRef(null);
+  const cleanupIntervalRef = useRef(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [streamUrl, setStreamUrl] = useState('');
   const autoConnectTriggeredRef = useRef(0);
+
+  // Manual SourceBuffer cleanup to prevent memory growth
+  const cleanupSourceBuffer = () => {
+    if (!playerRef.current || !videoRef.current) return;
+
+    const video = videoRef.current;
+    const bufferSize = settings.previewBufferSize ?? 15;
+
+    try {
+      // Access mpegts.js internals to get SourceBuffers
+      const msectl = playerRef.current._msectl;
+      if (!msectl || !msectl._sourceBuffers) return;
+
+      const currentTime = video.currentTime;
+      const removeEnd = currentTime - bufferSize;
+
+      // Only cleanup if we have data older than our buffer size
+      if (removeEnd <= 0) return;
+
+      // Iterate through all source buffers (video, audio)
+      for (const type in msectl._sourceBuffers) {
+        const sb = msectl._sourceBuffers[type];
+        if (!sb || sb.updating) continue;
+
+        try {
+          // Check if there's data to remove
+          if (sb.buffered && sb.buffered.length > 0) {
+            const bufferedStart = sb.buffered.start(0);
+            if (bufferedStart < removeEnd) {
+              // Remove old data from start up to removeEnd
+              sb.remove(bufferedStart, removeEnd);
+              console.log(`[Preview ${channelId}] Cleaned ${(removeEnd - bufferedStart).toFixed(1)}s from ${type} buffer`);
+            }
+          }
+        } catch (e) {
+          // SourceBuffer might be updating or removed, ignore
+        }
+      }
+    } catch (e) {
+      // Ignore errors accessing internals
+    }
+  };
+
+  // Start/stop cleanup interval based on connection state
+  useEffect(() => {
+    if (isConnected) {
+      // Run cleanup every 2 seconds
+      cleanupIntervalRef.current = setInterval(cleanupSourceBuffer, 2000);
+    } else {
+      if (cleanupIntervalRef.current) {
+        clearInterval(cleanupIntervalRef.current);
+        cleanupIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (cleanupIntervalRef.current) {
+        clearInterval(cleanupIntervalRef.current);
+        cleanupIntervalRef.current = null;
+      }
+    };
+  }, [isConnected, settings.previewBufferSize]);
 
   // Auto-connect when rundown loaded with setting enabled
   useEffect(() => {
@@ -104,6 +167,26 @@ export default function Preview({ channelId, expanded = false }) {
       }
 
       console.log(`[Preview ${channelId}] Creating mpegts.js player`);
+
+      // Configure buffer settings based on user-specified buffer size (in seconds)
+      const bufferSize = settings.previewBufferSize ?? 15;
+
+      // Derive all settings from the buffer size
+      // Lower buffer = more aggressive latency chasing, higher buffer = smoother playback
+      const bufferConfig = {
+        // Only enable latency chasing for small buffers (< 5 seconds)
+        liveBufferLatencyChasing: bufferSize < 5,
+        // Scale latency settings based on buffer size
+        liveBufferLatencyMaxLatency: Math.max(0.5, bufferSize / 5),
+        liveBufferLatencyMinRemain: Math.max(0.2, bufferSize / 15),
+        lazyLoadMaxDuration: Math.max(0.3, bufferSize / 8),
+        // Buffer cleanup settings
+        autoCleanupMaxBackwardDuration: bufferSize,
+        autoCleanupMinBackwardDuration: Math.max(1, Math.floor(bufferSize / 2)),
+      };
+
+      console.log(`[Preview ${channelId}] Using buffer size: ${bufferSize}s, latency chasing: ${bufferConfig.liveBufferLatencyChasing}`);
+
       const player = mpegts.createPlayer({
         type: 'mpegts',
         url: relayUrl,
@@ -111,11 +194,9 @@ export default function Preview({ channelId, expanded = false }) {
         hasAudio: false,  // Ignore audio - CasparCG sends 16-channel HE-AAC which browsers can't decode
       }, {
         enableWorker: true,
-        liveBufferLatencyChasing: true,
-        liveBufferLatencyMaxLatency: 1.0,
-        liveBufferLatencyMinRemain: 0.2,
-        lazyLoadMaxDuration: 0.5,
         seekType: 'range',
+        autoCleanupSourceBuffer: true,
+        ...bufferConfig,
       });
 
       // Handle player events
@@ -229,6 +310,61 @@ export default function Preview({ channelId, expanded = false }) {
     }
   };
 
+  // Handle video stall - recover by seeking to live edge (only for small buffers)
+  const handleVideoStalled = () => {
+    if (isConnected && videoRef.current && playerRef.current) {
+      const bufferSize = settings.previewBufferSize ?? 15;
+      const video = videoRef.current;
+
+      // For larger buffers (>= 5s), just try to resume - don't seek (causes more stutters)
+      if (bufferSize >= 5) {
+        video.play().catch(() => {});
+        return;
+      }
+
+      console.log(`[Preview ${channelId}] Video stalled, attempting recovery`);
+
+      // Check if we have buffered data ahead
+      if (video.buffered.length > 0) {
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        const currentTime = video.currentTime;
+        const threshold = bufferSize < 3 ? 0.5 : 1.0;
+
+        // If we're behind the buffer, seek to near the end (live edge)
+        if (bufferedEnd - currentTime > threshold) {
+          console.log(`[Preview ${channelId}] Seeking to live edge: ${bufferedEnd - 0.3}`);
+          video.currentTime = bufferedEnd - 0.3;
+        }
+      }
+
+      // Try to resume playback
+      video.play().catch(() => {});
+    }
+  };
+
+  // Handle video waiting (buffering) - only seek for very small buffers
+  const handleVideoWaiting = () => {
+    if (isConnected && videoRef.current) {
+      const bufferSize = settings.previewBufferSize ?? 15;
+
+      // Only auto-seek for small buffer sizes (< 3 seconds)
+      if (bufferSize >= 3) {
+        return;
+      }
+
+      const video = videoRef.current;
+
+      // If we've been waiting and have buffer ahead, seek forward
+      if (video.buffered.length > 0) {
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        if (bufferedEnd - video.currentTime > 1) {
+          console.log(`[Preview ${channelId}] Buffering detected, catching up to live`);
+          video.currentTime = bufferedEnd - 0.3;
+        }
+      }
+    }
+  };
+
   if (!connection.isConnected) {
     return (
       <div className={`preview ${expanded ? 'expanded' : ''}`}>
@@ -252,6 +388,8 @@ export default function Preview({ channelId, expanded = false }) {
         muted
         playsInline
         onError={handleVideoError}
+        onStalled={handleVideoStalled}
+        onWaiting={handleVideoWaiting}
         style={{ display: isConnected ? 'block' : 'none' }}
       />
 

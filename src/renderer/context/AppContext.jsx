@@ -6,6 +6,8 @@ import { processOscMessage } from '../services/oscHandler';
 import { executeMacro as runMacro } from '../services/macroExecutor';
 import { executeCommand as executeUnifiedCommand } from '../services/commandHandler';
 import { convertClipInfoToMetadata, localPathToCasparClip, findCasparMetadata } from '../services/casparMediaService';
+import { scheduleStartMacro, scheduleEndMacro, cancelScheduledMacro } from '../services/macroScheduler';
+import { createDefaultOffset } from '../utils/timecode';
 
 const AppContext = createContext();
 
@@ -61,6 +63,7 @@ export function AppProvider({ children }) {
     port: 5250,
     oscPort: 6250,
     defaultImageDuration: 5,
+    defaultMacroDuration: 5,  // Default duration for standalone macro items (seconds)
     previewQuality: 50,
     networkCache: 500,
     previewPort: 9250,
@@ -85,6 +88,7 @@ export function AppProvider({ children }) {
   const lastTimeRef = useRef({}); // Track last time updates for completion detection
   const imagePlayStartRef = useRef({}); // { [layerKey]: startTimestamp } for image time tracking
   const imageElapsedRef = useRef({}); // { [layerKey]: elapsedSeconds } for pause/resume
+  const executeMacroRef = useRef(null); // Ref to store executeMacro for use in playItem
 
   // Refs to track current state for the quit handler (avoids stale closure)
   const settingsRef = useRef(settings);
@@ -1053,7 +1057,8 @@ export function AppProvider({ children }) {
     let fileType = mediaFile.type || getFileType(mediaFile.name);
 
     // Get duration and frameRate - prefer CasparCG metadata
-    let duration = fileType === 'image' ? settings.defaultImageDuration : 0;
+    let duration = fileType === 'image' ? settings.defaultImageDuration :
+                   fileType === 'macro' ? settings.defaultMacroDuration : 0;
     let resolution = '';
     let frameRate = 25; // Default fallback
 
@@ -1092,7 +1097,14 @@ export function AppProvider({ children }) {
       inPoint: null,  // Keep for backward compatibility (seconds)
       outPoint: null,
       selected: false,
-      playing: false
+      playing: false,
+      // Macro-specific fields
+      macroId: mediaFile.macroId || null,
+      // Macro attachments (for non-macro items)
+      startMacro: null,  // { macroId, offset: { hours, minutes, seconds, frames, negative } }
+      endMacro: null,    // { macroId, offset: { hours, minutes, seconds, frames, negative } }
+      // Metadata (for macro color, etc.)
+      metadata: mediaFile.metadata || null
     };
 
     setState(prev => ({
@@ -1115,7 +1127,7 @@ export function AppProvider({ children }) {
         return ch;
       })
     }));
-  }, [state.media.rootPath, state.casparMedia.list, settings.defaultImageDuration, computeRelativePath]);
+  }, [state.media.rootPath, state.casparMedia.list, settings.defaultImageDuration, settings.defaultMacroDuration, computeRelativePath]);
 
   // Helper to determine file type from filename
   const getFileType = (filename) => {
@@ -1317,6 +1329,109 @@ export function AppProvider({ children }) {
                         resolution: metadata.resolution ?? item.resolution,
                         metadataVerified: true
                       };
+                    }
+                    return item;
+                  })
+                };
+              }
+              return layer;
+            })
+          };
+        }
+        return ch;
+      })
+    }));
+  }, []);
+
+  // Attach a macro to a playlist item (start or end position)
+  const attachMacroToItem = useCallback((channelId, layerId, itemId, macroId, position, offset = null) => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch => {
+        if (ch.id === channelId) {
+          return {
+            ...ch,
+            layers: ch.layers.map(layer => {
+              if (layer.id === layerId) {
+                return {
+                  ...layer,
+                  playlist: layer.playlist.map(item => {
+                    if (item.id === itemId) {
+                      const macroAttachment = {
+                        macroId,
+                        offset: offset || createDefaultOffset()
+                      };
+                      if (position === 'start') {
+                        return { ...item, startMacro: macroAttachment };
+                      } else if (position === 'end') {
+                        return { ...item, endMacro: macroAttachment };
+                      }
+                    }
+                    return item;
+                  })
+                };
+              }
+              return layer;
+            })
+          };
+        }
+        return ch;
+      })
+    }));
+  }, []);
+
+  // Remove a macro from a playlist item
+  const removeMacroFromItem = useCallback((channelId, layerId, itemId, position) => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch => {
+        if (ch.id === channelId) {
+          return {
+            ...ch,
+            layers: ch.layers.map(layer => {
+              if (layer.id === layerId) {
+                return {
+                  ...layer,
+                  playlist: layer.playlist.map(item => {
+                    if (item.id === itemId) {
+                      if (position === 'start') {
+                        return { ...item, startMacro: null };
+                      } else if (position === 'end') {
+                        return { ...item, endMacro: null };
+                      }
+                    }
+                    return item;
+                  })
+                };
+              }
+              return layer;
+            })
+          };
+        }
+        return ch;
+      })
+    }));
+  }, []);
+
+  // Update macro attachment offset
+  const updateMacroAttachmentOffset = useCallback((channelId, layerId, itemId, position, offset) => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch => {
+        if (ch.id === channelId) {
+          return {
+            ...ch,
+            layers: ch.layers.map(layer => {
+              if (layer.id === layerId) {
+                return {
+                  ...layer,
+                  playlist: layer.playlist.map(item => {
+                    if (item.id === itemId) {
+                      if (position === 'start' && item.startMacro) {
+                        return { ...item, startMacro: { ...item.startMacro, offset } };
+                      } else if (position === 'end' && item.endMacro) {
+                        return { ...item, endMacro: { ...item.endMacro, offset } };
+                      }
                     }
                     return item;
                   })
@@ -1641,13 +1756,13 @@ export function AppProvider({ children }) {
     }));
   }, []);
 
+  // Helper to get macro by ID
+  const getMacroById = useCallback((macroId) => {
+    return state.macros.find(m => m.id === macroId);
+  }, [state.macros]);
+
   // Play item on CasparCG
   const playItem = useCallback(async (channelId, layerId, itemIndex = null) => {
-    if (!connection.casparCG || !connection.isConnected) {
-      console.warn('Not connected to CasparCG');
-      return false;
-    }
-
     const channel = state.channels.find(ch => ch.id === channelId);
     if (!channel) return false;
 
@@ -1658,14 +1773,19 @@ export function AppProvider({ children }) {
     if (index < 0 || index >= layer.playlist.length) return false;
 
     const item = layer.playlist[index];
+    const channelFrameRate = channel.channelFrameRate || 25;
+    const layerKey = `${channelId}-${layerId}`;
 
-    try {
-      // Pass item object so formatClipPath can use relativePath
-      await casparCommands.play(connection.casparCG, channelId, layerId, item, {
-        loop: layer.loopItem,
-        inPoint: item.inPoint,
-        outPoint: item.outPoint
-      });
+    // Cancel any previously scheduled macros for this item
+    cancelScheduledMacro(item.id);
+
+    // Handle standalone macro items
+    if (item.type === 'macro' && item.macroId) {
+      const macro = getMacroById(item.macroId);
+      if (!macro) {
+        console.warn('Macro not found:', item.macroId);
+        return false;
+      }
 
       // Update state to reflect playing
       setState(prev => ({
@@ -1696,8 +1816,128 @@ export function AppProvider({ children }) {
         })
       }));
 
+      // Execute the macro using executeMacroRef (has full appContext)
+      try {
+        if (executeMacroRef.current) {
+          await executeMacroRef.current(macro);
+        } else {
+          console.warn('executeMacro not yet initialized');
+        }
+      } catch (error) {
+        console.error('Failed to execute macro:', error);
+      }
+
+      // Set up time tracking for macro duration (like images)
+      imagePlayStartRef.current[layerKey] = Date.now();
+
+      // Set auto-advance timer for standalone macros if playlist mode is enabled
+      if (layer.playlistMode && item.duration > 0 && !layer.loopItem) {
+        if (imageTimersRef.current[layerKey]) {
+          clearTimeout(imageTimersRef.current[layerKey]);
+        }
+        imageTimersRef.current[layerKey] = setTimeout(() => {
+          setState(currentState => {
+            const ch = currentState.channels.find(c => c.id === channelId);
+            const ly = ch?.layers.find(l => l.id === layerId);
+            if (ly?.playlistMode && !ly?.loopItem) {
+              setTimeout(() => autoAdvanceNext(channelId, layerId), 0);
+            }
+            return currentState;
+          });
+          delete imageTimersRef.current[layerKey];
+        }, item.duration * 1000);
+      }
+
+      return true;
+    }
+
+    // For non-macro items, require CasparCG connection
+    if (!connection.casparCG || !connection.isConnected) {
+      console.warn('Not connected to CasparCG');
+      return false;
+    }
+
+    try {
+      // Handle startMacro attachment
+      let playDelay = 0;
+      // Use executeMacroRef for full appContext (avoids circular dependency)
+      const runMacroFn = async (macro) => {
+        if (executeMacroRef.current) {
+          return await executeMacroRef.current(macro);
+        }
+        console.warn('executeMacro not yet initialized');
+        return { success: false, error: 'Not initialized' };
+      };
+      if (item.startMacro) {
+        const result = scheduleStartMacro(
+          item,
+          runMacroFn,
+          getMacroById,
+          channelFrameRate
+        );
+        if (result.shouldDelayPlay) {
+          playDelay = result.delayMs;
+        }
+      }
+
+      // Function to actually play the item
+      const doPlay = async () => {
+        // Pass item object so formatClipPath can use relativePath
+        await casparCommands.play(connection.casparCG, channelId, layerId, item, {
+          loop: layer.loopItem,
+          inPoint: item.inPoint,
+          outPoint: item.outPoint
+        });
+
+        // Update state to reflect playing
+        setState(prev => ({
+          ...prev,
+          channels: prev.channels.map(ch => {
+            if (ch.id === channelId) {
+              return {
+                ...ch,
+                layers: ch.layers.map(l => {
+                  if (l.id === layerId) {
+                    return {
+                      ...l,
+                      isPlaying: true,
+                      isPaused: false,
+                      currentIndex: index,
+                      playlist: l.playlist.map((pl, idx) => ({
+                        ...pl,
+                        playing: idx === index,
+                        selected: idx === index
+                      }))
+                    };
+                  }
+                  return l;
+                })
+              };
+            }
+            return ch;
+          })
+        }));
+
+        // Schedule endMacro if attached
+        if (item.endMacro && item.duration > 0) {
+          scheduleEndMacro(
+            item,
+            item.duration,
+            runMacroFn,
+            getMacroById,
+            channelFrameRate
+          );
+        }
+      };
+
+      // Delay play if startMacro has negative offset
+      if (playDelay > 0) {
+        await new Promise(resolve => setTimeout(resolve, playDelay));
+      }
+
+      await doPlay();
+
       // Handle image auto-advance with duration timeout
-      const layerKey = `${channelId}-${layerId}`;
       if (imageTimersRef.current[layerKey]) {
         clearTimeout(imageTimersRef.current[layerKey]);
         delete imageTimersRef.current[layerKey];
@@ -1731,14 +1971,16 @@ export function AppProvider({ children }) {
       }
 
       // Load next item in background if playlist mode (for videos)
-      if (layer.playlistMode && index < layer.playlist.length - 1 && item.type !== 'image') {
+      if (layer.playlistMode && index < layer.playlist.length - 1 && item.type !== 'image' && item.type !== 'macro') {
         const nextItem = layer.playlist[index + 1];
-        await casparCommands.loadBg(connection.casparCG, channelId, layerId, nextItem, {
-          auto: true,
-          loop: layer.loopItem,
-          inPoint: nextItem.inPoint,
-          outPoint: nextItem.outPoint
-        });
+        if (nextItem.type !== 'macro') {
+          await casparCommands.loadBg(connection.casparCG, channelId, layerId, nextItem, {
+            auto: true,
+            loop: layer.loopItem,
+            inPoint: nextItem.inPoint,
+            outPoint: nextItem.outPoint
+          });
+        }
       }
 
       return true;
@@ -1746,7 +1988,7 @@ export function AppProvider({ children }) {
       console.error('Failed to play item:', error);
       return false;
     }
-  }, [connection.casparCG, connection.isConnected, state.channels, autoAdvanceNext]);
+  }, [connection.casparCG, connection.isConnected, state.channels, state.macros, autoAdvanceNext, getMacroById]);
 
   // Pause playback
   const pausePlayback = useCallback(async (channelId, layerId) => {
@@ -2256,13 +2498,19 @@ export function AppProvider({ children }) {
     try {
       // Create app context object for client commands
       const appContext = {
+        // Transport commands
+        playItem,
+        pausePlayback,
+        resumePlayback,
+        stopPlayback,
+        nextItem,
+        prevItem,
+        // Client commands
         togglePlaylistMode,
         toggleLoopMode,
         toggleLoopItem,
         addChannel,
         addLayer,
-        nextItem,
-        prevItem,
         loadRundown
       };
 
@@ -2273,7 +2521,12 @@ export function AppProvider({ children }) {
       console.error('Macro execution failed:', error);
       return { success: false, error: error.message };
     }
-  }, [connection.casparCG, connection.isConnected, togglePlaylistMode, toggleLoopMode, toggleLoopItem, addChannel, addLayer, nextItem, prevItem]);
+  }, [connection.casparCG, connection.isConnected, playItem, pausePlayback, resumePlayback, stopPlayback, nextItem, prevItem, togglePlaylistMode, toggleLoopMode, toggleLoopItem, addChannel, addLayer]);
+
+  // Keep executeMacroRef updated for use in playItem (avoids circular dependency)
+  useEffect(() => {
+    executeMacroRef.current = executeMacro;
+  }, [executeMacro]);
 
   // Rundown management
   const loadRundownList = async () => {
@@ -2307,7 +2560,12 @@ export function AppProvider({ children }) {
           inPointFrames: item.inPointFrames,
           outPointFrames: item.outPointFrames,
           inPoint: item.inPoint,
-          outPoint: item.outPoint
+          outPoint: item.outPoint,
+          // Macro-specific fields
+          macroId: item.macroId || null,
+          startMacro: item.startMacro || null,
+          endMacro: item.endMacro || null,
+          metadata: item.metadata || null
           // NOT saving: selected, playing - these are runtime state
         })),
         currentIndex: layer.currentIndex,
@@ -2636,6 +2894,11 @@ export function AppProvider({ children }) {
     loadRundown,
     deleteRundown,
     clearAllChannels,
+    // Macro attachment functions
+    attachMacroToItem,
+    removeMacroFromItem,
+    updateMacroAttachmentOffset,
+    getMacroById,
     // CasparCG media functions
     refreshCasparMedia,
     refreshThumbnailList,

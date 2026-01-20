@@ -5,10 +5,31 @@ import PlaylistItem from './PlaylistItem';
 import './Playlist.css';
 
 export default function Playlist({ items, currentIndex, channelId, layerId, channelFrameRate, expanded = false, selectedItems = [], lastSelectedIndex = null, isLayerPlaying = false }) {
-  const { addMediaToPlaylist, reorderPlaylistItems, selectPlaylistItems, deleteSelectedItems, undoDelete } = useApp();
+  const { addMediaToPlaylist, reorderPlaylistItems, selectPlaylistItems, deleteSelectedItems, undoDelete, attachMacroToItem } = useApp();
   const [dragOverIndex, setDragOverIndex] = useState(null);
   const [lastClickIndex, setLastClickIndex] = useState(null);
+  const [macroAttachMenu, setMacroAttachMenu] = useState(null); // { x, y, macroId, macroName, targetItemId }
   const containerRef = useRef(null);
+
+  // Close macro attach menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (macroAttachMenu && !e.target.closest('.macro-attach-menu')) {
+        setMacroAttachMenu(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [macroAttachMenu]);
+
+  // Handle macro attachment selection
+  const handleMacroAttach = (position) => {
+    if (!macroAttachMenu) return;
+    if (position === 'start' || position === 'end') {
+      attachMacroToItem(channelId, layerId, macroAttachMenu.targetItemId, macroAttachMenu.macroId, position);
+    }
+    setMacroAttachMenu(null);
+  };
 
   // Handle keyboard events for delete and undo
   useEffect(() => {
@@ -70,10 +91,12 @@ export default function Playlist({ items, currentIndex, channelId, layerId, chan
   const handleDrop = (e) => {
     e.preventDefault();
     e.currentTarget.classList.remove('drag-over');
-    setDragOverIndex(null);
 
     const dragData = parseDragData(e);
-    if (!dragData) return;
+    if (!dragData) {
+      setDragOverIndex(null);
+      return;
+    }
 
     if (dragData.type === DRAG_TYPES.MEDIA_FILE) {
       // Add media file to playlist
@@ -84,16 +107,35 @@ export default function Playlist({ items, currentIndex, channelId, layerId, chan
         type: mediaFile.type,
         metadata: mediaFile.metadata
       });
+      setDragOverIndex(null);
     } else if (dragData.type === DRAG_TYPES.MACRO) {
-      // Add macro to playlist
       const macro = dragData.data;
-      addMediaToPlaylist(channelId, layerId, {
-        name: macro.name,
-        path: null,
-        type: 'macro',
-        macroId: macro.id,
-        metadata: { color: macro.color }
-      });
+
+      // Check if dropped on an existing non-macro item
+      if (dragOverIndex !== null && items[dragOverIndex] && items[dragOverIndex].type !== 'macro') {
+        // Show macro attach menu
+        const targetItem = items[dragOverIndex];
+        setMacroAttachMenu({
+          x: e.clientX,
+          y: e.clientY,
+          macroId: macro.id,
+          macroName: macro.name,
+          macroColor: macro.color,
+          targetItemId: targetItem.id,
+          targetItemName: targetItem.name
+        });
+        setDragOverIndex(null);
+      } else {
+        // Add macro as standalone item
+        addMediaToPlaylist(channelId, layerId, {
+          name: macro.name,
+          path: null,
+          type: 'macro',
+          macroId: macro.id,
+          metadata: { color: macro.color }
+        });
+        setDragOverIndex(null);
+      }
     } else if (dragData.type === DRAG_TYPES.PLAYLIST_ITEM) {
       // Reorder within same playlist or copy from another
       const sourceItem = dragData.data;
@@ -111,6 +153,7 @@ export default function Playlist({ items, currentIndex, channelId, layerId, chan
           metadata: sourceItem.item.metadata
         });
       }
+      setDragOverIndex(null);
     }
   };
 
@@ -175,6 +218,54 @@ export default function Playlist({ items, currentIndex, channelId, layerId, chan
           </div>
         ))}
       </div>
+
+      {/* Macro Attach Context Menu */}
+      {macroAttachMenu && (
+        <div
+          className="macro-attach-menu"
+          style={{
+            position: 'fixed',
+            left: macroAttachMenu.x,
+            top: macroAttachMenu.y,
+            zIndex: 1000
+          }}
+        >
+          <div className="macro-attach-menu-header">
+            <span
+              className="macro-attach-menu-color"
+              style={{ backgroundColor: macroAttachMenu.macroColor || '#ff6432' }}
+            />
+            Attach "{macroAttachMenu.macroName}"
+          </div>
+          <div className="macro-attach-menu-target">
+            to "{macroAttachMenu.targetItemName}"
+          </div>
+          <button
+            className="macro-attach-menu-item"
+            onClick={() => handleMacroAttach('start')}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+            Attach to Start
+          </button>
+          <button
+            className="macro-attach-menu-item"
+            onClick={() => handleMacroAttach('end')}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+            </svg>
+            Attach to End
+          </button>
+          <button
+            className="macro-attach-menu-item macro-attach-menu-cancel"
+            onClick={() => setMacroAttachMenu(null)}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }

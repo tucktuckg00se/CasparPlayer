@@ -15,6 +15,11 @@ class StreamRelay extends EventEmitter {
     this.server = null;
     this.clients = new Set();
     this.isReceiving = false;
+    this.incomingStream = null;
+    this.isPaused = false;
+    // Memory management settings
+    this.maxClientBuffer = 64 * 1024;  // 64KB per client before dropping frames
+    this.maxTotalBuffer = 256 * 1024;  // 256KB total before pausing incoming
   }
 
   async start() {
@@ -85,36 +90,78 @@ class StreamRelay extends EventEmitter {
     }
   }
 
+  // Check total buffer usage across all clients
+  getTotalBufferSize() {
+    let total = 0;
+    for (const client of this.clients) {
+      if (!client.writableEnded && !client.destroyed) {
+        total += client.writableLength || 0;
+      }
+    }
+    return total;
+  }
+
+  // Resume incoming stream if buffers have drained
+  checkResume() {
+    if (this.isPaused && this.incomingStream) {
+      const totalBuffer = this.getTotalBufferSize();
+      if (totalBuffer < this.maxTotalBuffer / 2) {
+        this.isPaused = false;
+        this.incomingStream.resume();
+      }
+    }
+  }
+
   // Handle incoming MPEGTS stream from ffmpeg
   handleIncomingStream(req, res) {
     req.setTimeout(0); // Disable timeout for this specific incoming POST request
     console.log(`[StreamRelay ${this.channelId}] ffmpeg connected, starting relay`);
     this.isReceiving = true;
+    this.incomingStream = req;
     this.emit('streamStarted', { channelId: this.channelId });
 
     req.on('data', (chunk) => {
+      // Check total buffer size - pause incoming if too high
+      const totalBuffer = this.getTotalBufferSize();
+      if (totalBuffer > this.maxTotalBuffer && !this.isPaused) {
+        this.isPaused = true;
+        req.pause();
+      }
+
       // Relay data to all connected clients
-      // Use a copy of clients set to allow safe deletion during iteration
       const clientsToRemove = [];
 
       for (const client of this.clients) {
         try {
           if (!client.writableEnded && !client.destroyed) {
-            // Write returns false if the buffer is full, but we don't need to wait
-            client.write(chunk, (err) => {
+            // Check per-client backpressure
+            if (client.writableLength > this.maxClientBuffer) {
+              // Client buffer is backed up, skip this chunk for this client
+              continue;
+            }
+
+            // Write and handle drain for flow control
+            const canContinue = client.write(chunk, (err) => {
               if (err) {
-                // Async write error - remove client on next iteration
                 if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
                   console.warn(`[StreamRelay ${this.channelId}] Async write error:`, err.message);
                 }
                 this.clients.delete(client);
               }
             });
+
+            // If write returned false, buffer is full - set up drain handler
+            if (!canContinue && !client._drainHandlerSet) {
+              client._drainHandlerSet = true;
+              client.once('drain', () => {
+                client._drainHandlerSet = false;
+                this.checkResume();
+              });
+            }
           } else {
             clientsToRemove.push(client);
           }
         } catch (err) {
-          // Synchronous write error
           if (err.code !== 'ECONNRESET' && err.code !== 'EPIPE') {
             console.warn(`[StreamRelay ${this.channelId}] Error writing to client:`, err.message);
           }
@@ -131,6 +178,7 @@ class StreamRelay extends EventEmitter {
     req.on('end', () => {
       console.log(`[StreamRelay ${this.channelId}] ffmpeg disconnected`);
       this.isReceiving = false;
+      this.incomingStream = null;
       this.emit('streamEnded', { channelId: this.channelId });
       res.writeHead(200);
       res.end();
@@ -142,6 +190,7 @@ class StreamRelay extends EventEmitter {
         console.error(`[StreamRelay ${this.channelId}] Incoming stream error:`, err);
       }
       this.isReceiving = false;
+      this.incomingStream = null;
       this.emit('streamError', { channelId: this.channelId, error: err.message });
     });
   }
@@ -149,6 +198,11 @@ class StreamRelay extends EventEmitter {
   // Handle browser client connection
   handleClientConnection(req, res) {
     console.log(`[StreamRelay ${this.channelId}] Browser client connected`);
+
+    // Set a lower highWaterMark on the socket to limit buffering
+    if (res.socket) {
+      res.socket.setNoDelay(true);  // Disable Nagle's algorithm for lower latency
+    }
 
     // Set headers for MPEGTS streaming
     res.writeHead(200, {
@@ -189,6 +243,10 @@ class StreamRelay extends EventEmitter {
 
   async stop() {
     console.log(`[StreamRelay ${this.channelId}] Stopping server...`);
+
+    // Clear incoming stream reference
+    this.incomingStream = null;
+    this.isPaused = false;
 
     // Close all client connections
     for (const client of this.clients) {

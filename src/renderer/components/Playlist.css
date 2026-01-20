@@ -58,3 +58,83 @@
   background: var(--accent-secondary);
   z-index: 1;
 }
+
+/* Macro Attach Context Menu */
+.macro-attach-menu {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 8px 0;
+  min-width: 180px;
+  transform: translate(-50%, 0);
+}
+
+.macro-attach-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+
+.macro-attach-menu-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.macro-attach-menu-target {
+  padding: 4px 12px 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.macro-attach-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.macro-attach-menu-item:hover {
+  background: rgba(0, 170, 136, 0.1);
+}
+
+.macro-attach-menu-item svg {
+  color: var(--accent-secondary);
+  flex-shrink: 0;
+}
+
+.macro-attach-menu-cancel {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-tertiary);
+}
+
+.macro-attach-menu-cancel:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.macro-attach-menu-cancel svg {
+  display: none;
+}

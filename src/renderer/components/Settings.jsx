@@ -246,6 +246,26 @@ export default function Settings({ onClose }) {
               </div>
               <span className="input-hint">These settings affect the fmp4 streaming from CasparCG to the preview window</span>
 
+              <h3 className="settings-section-title" style={{ marginTop: '20px' }}>Playback Buffer</h3>
+              <div className="input-group">
+                <label htmlFor="previewBufferSize">Buffer Size (seconds)</label>
+                <input
+                  id="previewBufferSize"
+                  type="number"
+                  className="input"
+                  value={editedSettings.previewBufferSize ?? 15}
+                  onChange={(e) => handleChange('previewBufferSize', Math.min(30, Math.max(1, parseInt(e.target.value) || 15)))}
+                  min="1"
+                  max="30"
+                  placeholder="15"
+                />
+                <span className="input-hint">
+                  Higher values (10-15): Smoother playback, more delay<br/>
+                  Lower values (2-5): Less delay, may stutter on slow connections<br/>
+                  Reconnect preview after changing this setting
+                </span>
+              </div>
+
               <h3 className="settings-section-title" style={{ marginTop: '20px' }}>Auto-Connect</h3>
               <div className="input-group">
                 <label className="checkbox-label">
@@ -277,6 +297,20 @@ export default function Settings({ onClose }) {
                   placeholder="5"
                 />
                 <span className="input-hint">How long images display before auto-advancing in playlists</span>
+              </div>
+
+              <div className="input-group">
+                <label htmlFor="defaultMacroDuration">Default Macro Duration (seconds)</label>
+                <input
+                  id="defaultMacroDuration"
+                  type="number"
+                  className="input"
+                  value={editedSettings.defaultMacroDuration || 5}
+                  onChange={(e) => handleChange('defaultMacroDuration', parseInt(e.target.value) || 5)}
+                  min="1"
+                  placeholder="5"
+                />
+                <span className="input-hint">How long standalone macro items run before auto-advancing</span>
               </div>
 
               <div className="input-group">

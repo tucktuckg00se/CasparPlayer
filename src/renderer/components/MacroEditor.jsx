@@ -175,6 +175,15 @@ export default function MacroEditor({ macro, onSave, onCancel }) {
 }
 
 function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
+  // Get command definition to know which params are needed
+  const commandDef = COMMAND_TYPES.find(t => t.value === command.type);
+  const commandParams = commandDef?.params || [];
+
+  // Helper to check if a param is needed for this command
+  const needsParam = (paramName) => {
+    return commandParams.some(p => p.replace('?', '') === paramName);
+  };
+
   const handleParamChange = (key, value) => {
     onUpdate({
       params: { ...command.params, [key]: value }
@@ -199,6 +208,18 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
     return createDefaultOffset();
   };
 
+  // Determine which basic params are needed
+  const showChannel = needsParam('channel');
+  const showLayer = needsParam('layer');
+  const showItemIndex = needsParam('itemIndex');
+  const showClip = needsParam('clip');
+  const showTemplate = needsParam('template');
+  const showName = needsParam('name');
+  const showMacroId = needsParam('macroId');
+  const showAmcp = needsParam('amcp');
+  const showData = needsParam('data');
+  const showPlayOnLoad = needsParam('playOnLoad');
+
   return (
     <div className="command-editor">
       <div className="command-header">
@@ -207,7 +228,13 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
         <StyledSelect
           className="command-type"
           value={command.type}
-          onChange={(value) => onUpdate({ type: value })}
+          onChange={(value) => onUpdate({
+            type: value,
+            params: {
+              channel: command.params?.channel ?? 1,
+              layer: command.params?.layer ?? 10
+            }
+          })}
           options={COMMAND_TYPES.map(t => ({
             value: t.value,
             label: t.label,
@@ -252,36 +279,54 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
       </div>
 
       <div className="command-params">
-        <div className="param-row">
-          <label>Channel</label>
-          <input
-            type="number"
-            className="input param-input"
-            value={command.channel}
-            onChange={e => onUpdate({ channel: parseInt(e.target.value) || 1 })}
-            min="1"
-          />
+        {/* Row 1: Channel, Layer, ItemIndex (if needed) */}
+        {(showChannel || showLayer || showItemIndex) && (
+          <div className="param-row">
+            {showChannel && (
+              <>
+                <label>Channel</label>
+                <input
+                  type="number"
+                  className="input param-input"
+                  value={command.params.channel ?? 1}
+                  onChange={e => handleParamChange('channel', parseInt(e.target.value) || 1)}
+                  min="1"
+                />
+              </>
+            )}
 
-          <label>Layer</label>
-          <input
-            type="number"
-            className="input param-input"
-            value={command.layer}
-            onChange={e => onUpdate({ layer: parseInt(e.target.value) || 1 })}
-            min="1"
-          />
+            {showLayer && (
+              <>
+                <label>Layer</label>
+                <input
+                  type="number"
+                  className="input param-input"
+                  value={command.params.layer ?? 1}
+                  onChange={e => handleParamChange('layer', parseInt(e.target.value) || 1)}
+                  min="1"
+                />
+              </>
+            )}
 
-          <label>Offset</label>
-          <OffsetTimecodeInput
-            value={getOffset()}
-            onChange={handleOffsetChange}
-            frameRate={25}
-            allowNegative={true}
-            compact={true}
-          />
-        </div>
+            {showItemIndex && (
+              <>
+                <label>Item Index</label>
+                <input
+                  type="number"
+                  className="input param-input"
+                  value={command.params.itemIndex ?? ''}
+                  onChange={e => handleParamChange('itemIndex', e.target.value ? parseInt(e.target.value) : null)}
+                  min="0"
+                  placeholder="Current"
+                  title="Leave empty to use current item"
+                />
+              </>
+            )}
+          </div>
+        )}
 
-        {(command.type === 'casparPlay' || command.type === 'casparLoadBg') && (
+        {/* Row 2: Clip and options for casparPlay/casparLoadBg */}
+        {showClip && (
           <div className="param-row">
             <label>Clip</label>
             <input
@@ -302,7 +347,8 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
           </div>
         )}
 
-        {command.type === 'cgAdd' && (
+        {/* Template for cgAdd */}
+        {showTemplate && (
           <div className="param-row">
             <label>Template</label>
             <input
@@ -312,23 +358,35 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
               onChange={e => handleParamChange('template', e.target.value)}
               placeholder="Template name"
             />
+            {showPlayOnLoad && (
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={command.params.playOnLoad !== false}
+                  onChange={e => handleParamChange('playOnLoad', e.target.checked)}
+                />
+                Play on load
+              </label>
+            )}
           </div>
         )}
 
-        {command.type === 'custom' && (
+        {/* Data for cgAdd/cgUpdate */}
+        {showData && (
           <div className="param-row">
-            <label>AMCP Command</label>
+            <label>Data (JSON)</label>
             <input
               type="text"
               className="input"
-              value={command.params.amcp || ''}
-              onChange={e => handleParamChange('amcp', e.target.value)}
-              placeholder="e.g., PLAY 1-10 AMB LOOP"
+              value={command.params.data || ''}
+              onChange={e => handleParamChange('data', e.target.value)}
+              placeholder='{"key": "value"}'
             />
           </div>
         )}
 
-        {command.type === 'loadRundown' && (
+        {/* Name for loadRundown/saveRundown */}
+        {showName && (
           <div className="param-row">
             <label>Rundown Name</label>
             <input
@@ -341,7 +399,8 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
           </div>
         )}
 
-        {command.type === 'executeMacro' && (
+        {/* MacroId for executeMacro */}
+        {showMacroId && (
           <div className="param-row">
             <label>Macro ID</label>
             <input
@@ -353,6 +412,32 @@ function CommandEditor({ command, index, total, onUpdate, onRemove, onMove }) {
             />
           </div>
         )}
+
+        {/* AMCP for custom */}
+        {showAmcp && (
+          <div className="param-row">
+            <label>AMCP Command</label>
+            <input
+              type="text"
+              className="input"
+              value={command.params.amcp || ''}
+              onChange={e => handleParamChange('amcp', e.target.value)}
+              placeholder="e.g., PLAY 1-10 AMB LOOP"
+            />
+          </div>
+        )}
+
+        {/* Offset - always shown */}
+        <div className="param-row">
+          <label>Offset</label>
+          <OffsetTimecodeInput
+            value={getOffset()}
+            onChange={handleOffsetChange}
+            frameRate={25}
+            allowNegative={true}
+            compact={true}
+          />
+        </div>
       </div>
     </div>
   );
