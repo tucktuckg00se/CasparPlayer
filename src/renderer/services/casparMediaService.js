@@ -37,13 +37,38 @@ export function convertClipInfoToMetadata(clipInfo) {
     ? clipInfo.frames / frameRate
     : 0;
 
+  // Parse datetime - could be YYYYMMDDHHMMSS format or Unix timestamp
+  let lastModified = null;
+  if (clipInfo.datetime) {
+    const dt = String(clipInfo.datetime);
+    if (dt.length === 14) {
+      // Format: YYYYMMDDHHMMSS (e.g., 20200502192622)
+      const year = dt.substring(0, 4);
+      const month = dt.substring(4, 6);
+      const day = dt.substring(6, 8);
+      const hour = dt.substring(8, 10);
+      const min = dt.substring(10, 12);
+      const sec = dt.substring(12, 14);
+      const date = new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}`);
+      if (!isNaN(date.getTime())) {
+        lastModified = date.toISOString();
+      }
+    } else if (clipInfo.datetime > 0) {
+      // Assume Unix timestamp
+      const date = new Date(clipInfo.datetime * 1000);
+      if (!isNaN(date.getTime())) {
+        lastModified = date.toISOString();
+      }
+    }
+  }
+
   return {
     duration,
     frameRate, // Will be null if invalid, allowing fallback logic to work properly
     frameCount: clipInfo.frames,
     size: clipInfo.size,
     type: mapCasparType(clipInfo.type),
-    lastModified: clipInfo.datetime ? new Date(clipInfo.datetime * 1000).toISOString() : null,
+    lastModified,
     source: 'casparcg'
   };
 }

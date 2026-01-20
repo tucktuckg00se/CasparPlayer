@@ -301,20 +301,47 @@ export async function executeRawCommand(casparCG, commandString) {
   }
 }
 
-// Parse a single CLS line with correct framerate calculation
-// Format: "clip/name" TYPE size datetime frames numerator/denominator
-// FPS = denominator / numerator (e.g., 100/2997 -> 2997/100 = 29.97 fps)
+// Parse a single CLS line - simple approach:
+// Take the last space-separated token (e.g., "97921/2937500"), split by "/", calculate denominator/numerator
+// CLS format: "clip/name" TYPE size datetime frames numerator/denominator
 function parseClsLine(line) {
-  // Match: "name" TYPE size datetime frames num/den
-  const match = line.match(/^"([^"]+)"\s+(\w+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\/(\d+)/);
-  if (!match) return null;
+  if (!line || typeof line !== 'string') return null;
 
-  const [, clip, type, size, datetime, frames, numerator, denominator] = match;
+  // Must start with a quoted clip name
+  if (!line.startsWith('"')) return null;
 
-  // Calculate correct framerate: FPS = denominator / numerator
-  const numVal = parseInt(numerator, 10);
-  const denVal = parseInt(denominator, 10);
-  const framerate = numVal > 0 ? denVal / numVal : 0;
+  // Find the framerate fraction at the end (last space-separated token)
+  const lastSpace = line.lastIndexOf(' ');
+  if (lastSpace === -1) return null;
+
+  const fractionStr = line.substring(lastSpace + 1).trim();
+  const fractionMatch = fractionStr.match(/^(\d+)\/(\d+)$/);
+  if (!fractionMatch) return null;
+
+  const numerator = parseInt(fractionMatch[1], 10);
+  const denominator = parseInt(fractionMatch[2], 10);
+  const framerate = numerator > 0 ? denominator / numerator : 0;
+
+  // Parse the rest of the line for other fields
+  // Format: "clip/name" TYPE size datetime frames
+  const match = line.match(/^"([^"]+)"\s+(\w+)\s+(\d+)\s+(\d+)\s+(\d+)\s+/);
+  if (!match) {
+    // At minimum we need the clip name
+    const clipMatch = line.match(/^"([^"]+)"/);
+    if (clipMatch) {
+      return {
+        clip: clipMatch[1],
+        type: 'MOVIE',
+        size: 0,
+        datetime: 0,
+        frames: 0,
+        framerate
+      };
+    }
+    return null;
+  }
+
+  const [, clip, type, size, datetime, frames] = match;
 
   return {
     clip,
@@ -326,46 +353,38 @@ function parseClsLine(line) {
   };
 }
 
-// Fix framerate for library-parsed clip data (fallback)
-// If framerate > 120, assume it's the raw denominator and try heuristic fixes
-function fixClipFramerate(clip) {
-  if (!clip?.framerate || (clip.framerate > 0 && clip.framerate <= 120)) {
-    return clip;
-  }
-  // Heuristic: common values like 2997 -> 29.97, 5994 -> 59.94
-  // These are typically denominator values where numerator was 100
-  return { ...clip, framerate: clip.framerate / 100 };
-}
 
 // CLS - List media files with metadata
+// Uses sendCustom to get raw CLS response, then parses framerate from fraction at end of each line
 export async function cls(casparCG, subDirectory = null) {
   if (!casparCG) {
     throw new Error('Not connected to CasparCG');
   }
 
   try {
-    const params = subDirectory ? { subDirectory } : {};
-    const result = await casparCG.cls(params);
+    // Send raw CLS command to get text response with framerate fractions
+    const command = subDirectory ? `CLS "${subDirectory}"` : 'CLS';
+    const result = await casparCG.sendCustom({ command });
+
     if (result?.request) {
       const response = await result.request;
+      const rawData = response.data;
 
-      // Log raw response for debugging framerate issues
-      console.log('CLS response:', response);
+      // Response data is an array of strings, each being a CLS line like:
+      // "clip/name"  MOVIE  30956380 20200502192622 3713 97921/2937500
+      if (Array.isArray(rawData)) {
+        const parsed = rawData
+          .filter(line => typeof line === 'string' && line.startsWith('"'))
+          .map(parseClsLine)
+          .filter(Boolean);
 
-      // If response.message contains raw text, parse it ourselves for correct framerate
-      if (response.message && typeof response.message === 'string') {
-        const lines = response.message.split('\n').filter(l => l.trim());
-        const parsed = lines.map(parseClsLine).filter(Boolean);
         if (parsed.length > 0) {
-          console.log('CLS parsed from raw message:', parsed.slice(0, 3));
+          console.log('CLS parsed', parsed.length, 'clips');
           return parsed;
         }
       }
-
-      // Fallback to library-parsed data with framerate fix
-      const data = response.data || [];
-      return data.map(fixClipFramerate);
     }
+
     return [];
   } catch (error) {
     console.error('CLS command failed:', error);

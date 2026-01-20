@@ -89,6 +89,7 @@ export function AppProvider({ children }) {
   const imagePlayStartRef = useRef({}); // { [layerKey]: startTimestamp } for image time tracking
   const imageElapsedRef = useRef({}); // { [layerKey]: elapsedSeconds } for pause/resume
   const executeMacroRef = useRef(null); // Ref to store executeMacro for use in playItem
+  const autoAdvanceProcessingRef = useRef({}); // { [layerKey]: boolean } - prevents concurrent auto-advance processing
 
   // Refs to track current state for the quit handler (avoids stale closure)
   const settingsRef = useRef(settings);
@@ -190,6 +191,29 @@ export function AppProvider({ children }) {
     });
   }, []);
 
+  // Replay the current item (for app-controlled looping)
+  const replayCurrentItem = useCallback((channelId, layerId) => {
+    setState(prev => {
+      const channel = prev.channels.find(ch => ch.id === channelId);
+      const layer = channel?.layers.find(l => l.id === layerId);
+      if (!layer || layer.currentIndex < 0) return prev;
+
+      return {
+        ...prev,
+        channels: prev.channels.map(ch => {
+          if (ch.id !== channelId) return ch;
+          return {
+            ...ch,
+            layers: ch.layers.map(l => {
+              if (l.id !== layerId) return l;
+              return { ...l, pendingReplay: true };
+            })
+          };
+        })
+      };
+    });
+  }, []);
+
   // Helper function to clear image timers and tracking for a layer
   const clearImageTimer = useCallback((channelId, layerId) => {
     const layerKey = `${channelId}-${layerId}`;
@@ -227,19 +251,21 @@ export function AppProvider({ children }) {
         const lastTime = lastTimeRef.current[layerKey];
         const timeRemaining = effectiveTotalTime - update.currentTime;
 
-        // Detect completion: total time > 0 and remaining time is very small
-        if (timeRemaining <= 0.1 && timeRemaining >= 0) {
-          // Only trigger once per completion
-          if (!lastTime || lastTime.completed !== true) {
-            lastTimeRef.current[layerKey] = { ...update, totalTime: effectiveTotalTime, completed: true };
-            // Only auto-advance if NOT looping the current item
-            // When loopItem is enabled, CasparCG handles the loop server-side
-            if (l && !l.loopItem) {
-              // Trigger auto-advance (schedule outside setState to avoid nested updates)
-              setTimeout(() => autoAdvanceNext(channel, layer), 0);
-            }
+        // Detect completion: widen window to 0.2s and allow negative up to -1.0s (catches overruns/jumps)
+        const isNearEnd = timeRemaining <= 0.2 && timeRemaining >= -1.0;
+
+        if (isNearEnd && !lastTime?.completed) {
+          lastTimeRef.current[layerKey] = { ...update, totalTime: effectiveTotalTime, completed: true };
+
+          // Check CURRENT mode values (allows mid-playback toggle)
+          // App-controlled looping: replay current item if loopItem is enabled
+          if (l && l.loopItem) {
+            setTimeout(() => replayCurrentItem(channel, layer), 0);
+          } else if (l && l.playlistMode) {
+            // Auto-advance to next item in playlist
+            setTimeout(() => autoAdvanceNext(channel, layer), 0);
           }
-        } else {
+        } else if (!isNearEnd) {
           lastTimeRef.current[layerKey] = { ...update, totalTime: effectiveTotalTime, completed: false };
         }
       }
@@ -304,7 +330,7 @@ export function AppProvider({ children }) {
         })
       };
     });
-  }, [autoAdvanceNext]);
+  }, [autoAdvanceNext, replayCurrentItem]);
 
   // Save settings on app close (only settings, not channel state)
   // Uses refs to access current state values, avoiding stale closure issues
@@ -468,114 +494,136 @@ export function AppProvider({ children }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Process pending auto-advance
+  // Process pending auto-advance and pending replay (app-controlled looping)
   useEffect(() => {
     if (!connection.casparCG || !connection.isConnected) return;
 
     state.channels.forEach(channel => {
       channel.layers.forEach(async layer => {
-        if (layer.pendingAutoAdvance !== undefined && layer.pendingAutoAdvance !== null) {
-          const nextIndex = layer.pendingAutoAdvance;
-          const nextItem = layer.playlist[nextIndex];
+        const layerKey = `${channel.id}-${layer.id}`;
+        const hasPendingAdvance = layer.pendingAutoAdvance !== undefined && layer.pendingAutoAdvance !== null;
+        const hasPendingReplay = layer.pendingReplay === true;
 
-          if (nextItem) {
-            const layerKey = `${channel.id}-${layer.id}`;
+        // Skip if nothing to process or already processing this layer
+        if (!hasPendingAdvance && !hasPendingReplay) return;
+        if (autoAdvanceProcessingRef.current[layerKey]) return;
 
-            try {
-              // Import casparCommands dynamically to avoid circular dependencies
-              await casparCommands.play(connection.casparCG, channel.id, layer.id, nextItem, {
-                loop: layer.loopItem,
-                inPoint: nextItem.inPoint,
-                outPoint: nextItem.outPoint
-              });
+        // Set processing lock
+        autoAdvanceProcessingRef.current[layerKey] = true;
 
-              // Clear any existing image timers
-              if (imageTimersRef.current[layerKey]) {
-                clearTimeout(imageTimersRef.current[layerKey]);
-                delete imageTimersRef.current[layerKey];
-              }
-              delete imageElapsedRef.current[layerKey];
+        // Clear pending flags BEFORE async play to prevent re-triggering
+        const nextIndex = hasPendingAdvance ? layer.pendingAutoAdvance : layer.currentIndex;
+        setState(prev => ({
+          ...prev,
+          channels: prev.channels.map(ch => {
+            if (ch.id !== channel.id) return ch;
+            return {
+              ...ch,
+              layers: ch.layers.map(l => {
+                if (l.id !== layer.id) return l;
+                return { ...l, pendingAutoAdvance: null, pendingReplay: false };
+              })
+            };
+          })
+        }));
 
-              // Set up image timing for auto-advanced items
-              if (nextItem.type === 'image') {
-                imagePlayStartRef.current[layerKey] = Date.now();
+        const nextItem = layer.playlist[nextIndex];
+        if (!nextItem) {
+          autoAdvanceProcessingRef.current[layerKey] = false;
+          return;
+        }
 
-                // Set auto-advance timer if playlist mode and not looping item
-                if (layer.playlistMode && nextItem.duration > 0 && !layer.loopItem) {
-                  imageTimersRef.current[layerKey] = setTimeout(() => {
-                    setState(currentState => {
-                      const ch = currentState.channels.find(c => c.id === channel.id);
-                      const ly = ch?.layers.find(l => l.id === layer.id);
-                      if (ly?.playlistMode && !ly?.loopItem) {
-                        setTimeout(() => autoAdvanceNext(channel.id, layer.id), 0);
-                      }
-                      return currentState;
-                    });
-                    delete imageTimersRef.current[layerKey];
-                  }, nextItem.duration * 1000);
-                }
-              } else {
-                // Clear image tracking for non-images
-                delete imagePlayStartRef.current[layerKey];
-              }
+        try {
+          // Reset completion tracking for replay/advance
+          lastTimeRef.current[layerKey] = { completed: false };
 
-              // Update state to reflect playing
-              setState(prev => ({
-                ...prev,
-                channels: prev.channels.map(ch => {
-                  if (ch.id !== channel.id) return ch;
-                  return {
-                    ...ch,
-                    layers: ch.layers.map(l => {
-                      if (l.id !== layer.id) return l;
-                      return {
-                        ...l,
-                        pendingAutoAdvance: null,
-                        isPlaying: true,
-                        currentIndex: nextIndex,
-                        playlist: l.playlist.map((pl, idx) => ({
-                          ...pl,
-                          playing: idx === nextIndex,
-                          selected: idx === nextIndex
-                        }))
-                      };
-                    })
-                  };
-                })
-              }));
+          // Play the item (never pass loop: true to CasparCG - app controls looping)
+          await casparCommands.play(connection.casparCG, channel.id, layer.id, nextItem, {
+            loop: false,
+            inPoint: nextItem.inPoint,
+            outPoint: nextItem.outPoint
+          });
 
-              // Load next item in background if playlist mode (for videos only)
-              if (layer.playlistMode && nextIndex < layer.playlist.length - 1 && nextItem.type !== 'image') {
-                const bgItem = layer.playlist[nextIndex + 1];
-                await casparCommands.loadBg(connection.casparCG, channel.id, layer.id, bgItem, {
-                  auto: true,
-                  loop: layer.loopItem,
-                  inPoint: bgItem.inPoint,
-                  outPoint: bgItem.outPoint
-                });
-              }
-            } catch (error) {
-              console.error('Auto-advance playback failed:', error);
-              // Clear pending flag on error
-              setState(prev => ({
-                ...prev,
-                channels: prev.channels.map(ch => {
-                  if (ch.id !== channel.id) return ch;
-                  return {
-                    ...ch,
-                    layers: ch.layers.map(l => {
-                      if (l.id !== layer.id) return l;
-                      return { ...l, pendingAutoAdvance: null };
-                    })
-                  };
-                })
-              }));
-            }
+          // Clear any existing image timers
+          if (imageTimersRef.current[layerKey]) {
+            clearTimeout(imageTimersRef.current[layerKey]);
+            delete imageTimersRef.current[layerKey];
           }
+          delete imageElapsedRef.current[layerKey];
+
+          // Set up image timing for auto-advanced/replayed items
+          if (nextItem.type === 'image') {
+            imagePlayStartRef.current[layerKey] = Date.now();
+
+            // Set auto-advance timer if playlist mode and not looping item
+            if (nextItem.duration > 0) {
+              imageTimersRef.current[layerKey] = setTimeout(() => {
+                setState(currentState => {
+                  const ch = currentState.channels.find(c => c.id === channel.id);
+                  const ly = ch?.layers.find(l => l.id === layer.id);
+                  // Check current mode values (allows mid-playback toggle)
+                  if (ly?.loopItem) {
+                    setTimeout(() => replayCurrentItem(channel.id, layer.id), 0);
+                  } else if (ly?.playlistMode) {
+                    setTimeout(() => autoAdvanceNext(channel.id, layer.id), 0);
+                  }
+                  return currentState;
+                });
+                delete imageTimersRef.current[layerKey];
+              }, nextItem.duration * 1000);
+            }
+          } else {
+            // Clear image tracking for non-images
+            delete imagePlayStartRef.current[layerKey];
+          }
+
+          // Update state to reflect playing
+          setState(prev => ({
+            ...prev,
+            channels: prev.channels.map(ch => {
+              if (ch.id !== channel.id) return ch;
+              return {
+                ...ch,
+                layers: ch.layers.map(l => {
+                  if (l.id !== layer.id) return l;
+                  return {
+                    ...l,
+                    isPlaying: true,
+                    currentIndex: nextIndex,
+                    playlist: l.playlist.map((pl, idx) => ({
+                      ...pl,
+                      playing: idx === nextIndex,
+                      selected: idx === nextIndex
+                    }))
+                  };
+                })
+              };
+            })
+          }));
+
+          // Load next item in background if playlist mode (for videos only, and not looping current item)
+          // Get fresh layer state to check current mode values
+          const freshState = stateRef.current;
+          const freshChannel = freshState.channels.find(c => c.id === channel.id);
+          const freshLayer = freshChannel?.layers.find(l => l.id === layer.id);
+          if (freshLayer?.playlistMode && !freshLayer?.loopItem && nextIndex < layer.playlist.length - 1 && nextItem.type !== 'image') {
+            const bgItem = layer.playlist[nextIndex + 1];
+            await casparCommands.loadBg(connection.casparCG, channel.id, layer.id, bgItem, {
+              auto: true,
+              loop: false,
+              inPoint: bgItem.inPoint,
+              outPoint: bgItem.outPoint
+            });
+          }
+        } catch (error) {
+          console.error('Auto-advance/replay playback failed:', error);
+        } finally {
+          // Always release the lock
+          autoAdvanceProcessingRef.current[layerKey] = false;
         }
       });
     });
-  }, [state.channels, connection.casparCG, connection.isConnected, autoAdvanceNext]);
+  }, [state.channels, connection.casparCG, connection.isConnected, autoAdvanceNext, replayCurrentItem]);
 
   // Load config: Only loads connection settings and app settings (not channel state)
   // Channel state is loaded separately via rundowns
@@ -990,7 +1038,8 @@ export function AppProvider({ children }) {
     isPlaying: false,
     isPaused: false,        // Track paused state for proper resume
     selectedItems: [],      // Array of selected item IDs for multi-select
-    deletedItems: []        // Undo stack for deleted items
+    deletedItems: [],       // Undo stack for deleted items
+    pendingReplay: false    // Flag for app-controlled item replay/loop
   });
 
   // Fetch channel info (frame rate, resolution) from CasparCG INFO command
@@ -1883,8 +1932,9 @@ export function AppProvider({ children }) {
       // Function to actually play the item
       const doPlay = async () => {
         // Pass item object so formatClipPath can use relativePath
+        // Never pass loop: true to CasparCG - app controls looping via pendingReplay
         await casparCommands.play(connection.casparCG, channelId, layerId, item, {
-          loop: layer.loopItem,
+          loop: false,
           inPoint: item.inPoint,
           outPoint: item.outPoint
         });
@@ -1971,12 +2021,13 @@ export function AppProvider({ children }) {
       }
 
       // Load next item in background if playlist mode (for videos)
-      if (layer.playlistMode && index < layer.playlist.length - 1 && item.type !== 'image' && item.type !== 'macro') {
+      // Only preload if not looping current item (check current mode value)
+      if (layer.playlistMode && !layer.loopItem && index < layer.playlist.length - 1 && item.type !== 'image' && item.type !== 'macro') {
         const nextItem = layer.playlist[index + 1];
         if (nextItem.type !== 'macro') {
           await casparCommands.loadBg(connection.casparCG, channelId, layerId, nextItem, {
             auto: true,
-            loop: layer.loopItem,
+            loop: false,
             inPoint: nextItem.inPoint,
             outPoint: nextItem.outPoint
           });
