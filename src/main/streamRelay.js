@@ -24,9 +24,10 @@ class StreamRelay extends EventEmitter {
       });
 
       // Configure socket timeouts to handle stale connections
-      this.server.keepAliveTimeout = 60000; // 60 seconds
-      this.server.headersTimeout = 65000; // Slightly higher than keepAliveTimeout
-      this.server.timeout = 0; // Disable request timeout for streaming
+      this.server.timeout = 0;            // Disable general socket timeout
+      this.server.requestTimeout = 0;     // Disable the 5-minute request limit (Node 14+)
+      this.server.keepAliveTimeout = 0;    // Disable keep-alive timeout for streaming
+      this.server.headersTimeout = 0;     // Disable header timeout
 
       this.server.on('error', (err) => {
         console.error(`[StreamRelay ${this.channelId}] Server error:`, err);
@@ -86,6 +87,7 @@ class StreamRelay extends EventEmitter {
 
   // Handle incoming MPEGTS stream from ffmpeg
   handleIncomingStream(req, res) {
+    req.setTimeout(0); // Disable timeout for this specific incoming POST request
     console.log(`[StreamRelay ${this.channelId}] ffmpeg connected, starting relay`);
     this.isReceiving = true;
     this.emit('streamStarted', { channelId: this.channelId });

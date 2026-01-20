@@ -8,7 +8,7 @@
 
 ---
 
-***Fair warning, this app was vibe-coded. It mostly likely has a lot of bad programming and maybe some libraries that are outdated. It does work though, so that is pretty rad***
+***Fair warning, this app was vibe-coded. It mostly likely has a lot of bad programming and a lot of dead code. It does (mostly) work though, so that is pretty rad***
 
 ---
 

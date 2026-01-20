@@ -7,6 +7,7 @@ const oscService = require('./oscService');
 const streamRelay = require('./streamRelay');
 const apiServer = require('./apiServer');
 
+
 let mainWindow;
 let mediaWatcher = null;
 
@@ -41,7 +42,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      enableRemoteModule: true
+      enableRemoteModule: true,
+      backgroundThrottling: false // This prevents the engine from pausing media
     },
     show: false,
     frame: true,
