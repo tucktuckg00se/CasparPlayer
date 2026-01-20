@@ -180,6 +180,7 @@ class ApiServer extends EventEmitter {
         { command: 'play', params: ['channel', 'layer', 'itemIndex?'], description: 'Play playlist item' },
         { command: 'pause', params: ['channel', 'layer'], description: 'Pause playback' },
         { command: 'resume', params: ['channel', 'layer'], description: 'Resume playback' },
+        { command: 'playPauseResume', params: ['channel', 'layer', 'itemIndex?'], description: 'Toggle play/pause/resume' },
         { command: 'stop', params: ['channel', 'layer'], description: 'Stop playback' },
         { command: 'next', params: ['channel', 'layer'], description: 'Next playlist item' },
         { command: 'prev', params: ['channel', 'layer'], description: 'Previous playlist item' }

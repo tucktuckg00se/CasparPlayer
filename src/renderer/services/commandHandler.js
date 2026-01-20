@@ -21,6 +21,11 @@ export const COMMANDS = {
     description: 'Resume paused playback',
     category: 'transport'
   },
+  playPauseResume: {
+    params: ['channel', 'layer', 'itemIndex?'],
+    description: 'Toggle play/pause/resume like the UI button',
+    category: 'transport'
+  },
   stop: {
     params: ['channel', 'layer'],
     description: 'Stop playback',
@@ -252,6 +257,10 @@ async function executeTransportCommand(command, params, context) {
       await appContext.resumePlayback(channel, layer);
       return { success: true };
 
+    case 'playPauseResume':
+      await appContext.playPauseResume(channel, layer, itemIndex);
+      return { success: true };
+
     case 'stop':
       await appContext.stopPlayback(channel, layer);
       return { success: true };
@@ -470,6 +479,7 @@ export function getCommandTypesForEditor() {
     play: 'Play',
     pause: 'Pause',
     resume: 'Resume',
+    playPauseResume: 'Play/Pause/Resume (Toggle)',
     stop: 'Stop',
     next: 'Next Item',
     prev: 'Previous Item',

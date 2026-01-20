@@ -3,5 +3,4 @@ dist
 .claude
 package-lock.json
 docs
-.claude
 PRD.md

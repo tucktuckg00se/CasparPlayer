@@ -19,6 +19,11 @@ export default function LayerControls({ layer, channelId }) {
   const isConnected = connection.isConnected;
   const hasItems = layer.playlist.length > 0;
 
+  // Detect if playback has finished (currentTime reached totalTime)
+  // This happens when isPlaying is true but the media has ended
+  const hasFinishedPlaying = layer.isPlaying && !layer.isPaused &&
+    layer.totalTime > 0 && layer.currentTime >= layer.totalTime - 0.1;
+
   const handlePrevious = () => {
     prevItem(channelId, layer.id);
   };
@@ -71,7 +76,7 @@ export default function LayerControls({ layer, channelId }) {
           </svg>
         </button>
 
-        {layer.isPlaying && !layer.isPaused ? (
+        {layer.isPlaying && !layer.isPaused && !hasFinishedPlaying ? (
           <button
             className="control-btn control-btn-primary"
             onClick={handlePause}

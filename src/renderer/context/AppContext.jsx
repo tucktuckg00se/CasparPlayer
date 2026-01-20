@@ -2102,6 +2102,47 @@ export function AppProvider({ children }) {
     }
   }, [connection.casparCG, connection.isConnected, state.channels, autoAdvanceNext]);
 
+  // Toggle play/pause/resume - mimics UI play button behavior
+  const playPauseResume = useCallback(async (channelId, layerId, itemIndex = null) => {
+    const channel = state.channels.find(ch => ch.id === channelId);
+    const layer = channel?.layers.find(l => l.id === layerId);
+
+    if (!layer) return false;
+
+    // Detect if playback has finished (currentTime reached totalTime)
+    const hasFinishedPlaying = layer.isPlaying && !layer.isPaused &&
+      layer.totalTime > 0 && layer.currentTime >= layer.totalTime - 0.1;
+
+    // If playing and not paused and not finished → pause
+    if (layer.isPlaying && !layer.isPaused && !hasFinishedPlaying) {
+      return await pausePlayback(channelId, layerId);
+    }
+
+    // If paused → resume
+    if (layer.isPaused) {
+      return await resumePlayback(channelId, layerId);
+    }
+
+    // Otherwise (stopped or finished) → play (determine index like UI does)
+    let index = itemIndex;
+    if (index === null || index === undefined) {
+      // Check selected items first
+      if (layer.selectedItems && layer.selectedItems.length > 0) {
+        const selectedId = layer.selectedItems[0];
+        const selectedIndex = layer.playlist.findIndex(item => item.id === selectedId);
+        if (selectedIndex >= 0) {
+          index = selectedIndex;
+        }
+      }
+      // Fall back to currentIndex or first item
+      if (index === null || index === undefined) {
+        index = layer.currentIndex >= 0 ? layer.currentIndex : 0;
+      }
+    }
+
+    return await playItem(channelId, layerId, index);
+  }, [state.channels, pausePlayback, resumePlayback, playItem]);
+
   // Stop playback
   const stopPlayback = useCallback(async (channelId, layerId) => {
     if (!connection.casparCG || !connection.isConnected) return false;
@@ -2502,6 +2543,7 @@ export function AppProvider({ children }) {
         playItem,
         pausePlayback,
         resumePlayback,
+        playPauseResume,
         stopPlayback,
         nextItem,
         prevItem,
@@ -2521,7 +2563,7 @@ export function AppProvider({ children }) {
       console.error('Macro execution failed:', error);
       return { success: false, error: error.message };
     }
-  }, [connection.casparCG, connection.isConnected, playItem, pausePlayback, resumePlayback, stopPlayback, nextItem, prevItem, togglePlaylistMode, toggleLoopMode, toggleLoopItem, addChannel, addLayer]);
+  }, [connection.casparCG, connection.isConnected, playItem, pausePlayback, resumePlayback, playPauseResume, stopPlayback, nextItem, prevItem, togglePlaylistMode, toggleLoopMode, toggleLoopItem, addChannel, addLayer]);
 
   // Keep executeMacroRef updated for use in playItem (avoids circular dependency)
   useEffect(() => {
@@ -2750,6 +2792,7 @@ export function AppProvider({ children }) {
         playItem,
         pausePlayback,
         resumePlayback,
+        playPauseResume,
         stopPlayback,
         nextItem,
         prevItem,
@@ -2805,7 +2848,7 @@ export function AppProvider({ children }) {
     };
   }, [
     connection.casparCG, state, getStateForApi,
-    playItem, pausePlayback, resumePlayback, stopPlayback,
+    playItem, pausePlayback, resumePlayback, playPauseResume, stopPlayback,
     nextItem, prevItem, togglePlaylistMode, toggleLoopMode, toggleLoopItem,
     loadRundown, saveRundown, clearAllChannels,
     addChannel, addLayer, deleteChannel, deleteLayer, executeMacro
@@ -2871,6 +2914,7 @@ export function AppProvider({ children }) {
     playItem,
     pausePlayback,
     resumePlayback,
+    playPauseResume,
     stopPlayback,
     nextItem,
     prevItem,
