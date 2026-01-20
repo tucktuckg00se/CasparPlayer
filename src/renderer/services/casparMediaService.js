@@ -14,7 +14,7 @@ function mapCasparType(casparType) {
   }
 }
 
-// Validate and normalize framerate value
+// Validate framerate value
 function normalizeFrameRate(rawFrameRate) {
   if (rawFrameRate === null || rawFrameRate === undefined) return null;
 
@@ -23,8 +23,7 @@ function normalizeFrameRate(rawFrameRate) {
   // Validate it's a reasonable framerate (between 1 and 120)
   if (isNaN(fps) || fps <= 0 || fps > 120) return null;
 
-  // Round to 2 decimal places for cleaner display
-  return Math.round(fps * 100) / 100;
+  return fps;
 }
 
 // Convert CasparCG ClipInfo to app's metadata format
