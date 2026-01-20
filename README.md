@@ -50,7 +50,23 @@
 - MPEG-TS streaming from CasparCG
 - Hardware-accelerated playback via mpegts.js
 - Per-channel preview windows
-- Configurable stream settings
+- Configurable stream settings (resolution, quality, encoding preset)
+- **Buffer Management:**
+  - Configurable buffer size (1-30 seconds, default 15)
+  - Automatic SourceBuffer cleanup to prevent memory growth
+  - Flow control with backpressure handling
+  - Automatic stall recovery for smooth playback
+- Auto-connect option when loading rundowns
+
+### External Control API
+- HTTP REST API for external application control
+- WebSocket support for real-time state updates
+- Configurable API port
+- Available endpoints:
+  - `POST /api/command` - Execute commands
+  - `GET /api/state` - Get current state
+  - `GET /api/status` - Get server status
+  - `GET /api/commands` - List available commands
 
 ### OSC Integration
 - Real-time time and frame updates from CasparCG
@@ -65,9 +81,15 @@
 
 ### Macro System
 - Create custom server command sequences
-- Client-side automation commands
+- Client-side automation commands (delays, conditionals)
 - Save and organize macros
 - Quick execution from sidebar
+- **Macro Scheduling:**
+  - Attach macros to playlist items (start/end triggers)
+  - Timecode-based offsets (HH:MM:SS:FF)
+  - Negative offsets execute before trigger point
+  - Positive offsets execute after trigger point
+  - Automatic cancellation when items are stopped
 
 ### Rundown Management
 - Save complete session state
@@ -162,22 +184,34 @@ Default connection values:
 - **AMCP Port:** `5250`
 - **OSC Port:** `6250`
 
-### Preview Streaming
+### Preview Settings
 
-CasparPlayer uses MPEG-TS streaming for live preview. Configure your CasparCG server to output an MPEG-TS stream:
+CasparPlayer streams live preview directly from CasparCG using MPEG-TS. No manual CasparCG configuration needed - the app sends ADD STREAM commands automatically.
 
-```xml
-<!-- In casparcg.config -->
-<consumers>
-    <decklink>
-        <!-- Your SDI output -->
-    </decklink>
-    <ffmpeg>
-        <path>udp://127.0.0.1:5004</path>
-        <args>-f mpegts</args>
-    </ffmpeg>
-</consumers>
-```
+**Preview options (Settings > Preview):**
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Preview Quality | Video quality (0-100%) | 50% |
+| Preview Port | Base port for stream relay | 9250 |
+| Preview Resolution | Output resolution | 384x216 |
+| Encoding Preset | x264 encoding speed | Ultrafast |
+| Encoding Tune | x264 tuning | Zero Latency |
+| Buffer Size | Seconds of video to buffer (1-30) | 15 |
+| Auto-Connect | Connect previews on rundown load | Off |
+
+**Buffer Size guidance:**
+- **Higher values (10-15):** Smoother playback, more delay
+- **Lower values (2-5):** Less delay, may stutter on slow connections
+
+### External API Settings
+
+Enable the HTTP/WebSocket API in Settings > API to allow external control:
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| Enable API | Turn on/off the control server | Off |
+| API Port | HTTP/WebSocket server port | 8088 |
 
 ### Config File Location
 
