@@ -24,7 +24,6 @@
 - Connect to any CasparCG Server instance (local or network)
 - Real-time connection status monitoring
 - Configurable AMCP and OSC ports
-- Automatic reconnection handling
 
 ### Channel & Layer System
 - Unlimited channels and layers
@@ -37,13 +36,13 @@
 - Multi-select with Shift+Click and Ctrl+A
 - In/out point trimming for clips
 - Undo support (Ctrl+Z)
-- Auto-advance to next item on playback completion
+- Playlist mode option
 - Loop playlist option
+- Loop item option
 
 ### Playback Control
 - Play, pause, stop controls per layer
 - Next/previous item navigation
-- Progress bar with seek functionality
 - Real-time time display (current / duration)
 
 ### Live Preview
@@ -51,16 +50,12 @@
 - Hardware-accelerated playback via mpegts.js
 - Per-channel preview windows
 - Configurable stream settings (resolution, quality, encoding preset)
-- **Buffer Management:**
-  - Configurable buffer size (1-30 seconds, default 15)
-  - Automatic SourceBuffer cleanup to prevent memory growth
-  - Flow control with backpressure handling
-  - Automatic stall recovery for smooth playback
+- Configurable buffer size (1-30 seconds, default 15)
 - Auto-connect option when loading rundowns
 
 ### External Control API
 - HTTP REST API for external application control
-- WebSocket support for real-time state updates
+- WebSocket support for external application control and real-time state updates
 - Configurable API port
 - Available endpoints:
   - `POST /api/command` - Execute commands
@@ -94,7 +89,6 @@
 ### Rundown Management
 - Save complete session state
 - Load previous rundowns
-- Auto-save every 30 seconds
 - Export/import configurations
 
 ### Keyboard Shortcuts
