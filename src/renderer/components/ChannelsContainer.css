@@ -24,6 +24,31 @@
   margin-left: 12px;
 }
 
+.expanded-channel-name.editable {
+  cursor: pointer;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.expanded-channel-name.editable:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.expanded-channel-name-input {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--accent-primary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  outline: none;
+  width: 200px;
+}
+
 .channels-grid {
   display: flex;
   gap: 20px;

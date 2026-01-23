@@ -401,6 +401,9 @@ export default function Preview({ channelId, expanded = false }) {
                 <div className="loading-spinner"></div>
               </div>
               <p>Connecting to stream...</p>
+              <button className="btn btn-secondary btn-sm" onClick={handleDisconnect}>
+                Cancel
+              </button>
             </>
           ) : error ? (
             <>

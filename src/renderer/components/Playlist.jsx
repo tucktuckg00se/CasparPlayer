@@ -31,6 +31,37 @@ export default function Playlist({ items, currentIndex, channelId, layerId, chan
     setMacroAttachMenu(null);
   };
 
+  // Calculate menu position to keep it within viewport
+  const getMenuPosition = () => {
+    if (!macroAttachMenu) return { left: 0, top: 0 };
+
+    const menuWidth = 200; // Approximate width
+    const menuHeight = 180; // Approximate height
+    const padding = 8;
+
+    let left = macroAttachMenu.x;
+    let top = macroAttachMenu.y;
+
+    // Adjust for right edge
+    if (left + menuWidth / 2 > window.innerWidth - padding) {
+      left = window.innerWidth - menuWidth / 2 - padding;
+    }
+    // Adjust for left edge
+    if (left - menuWidth / 2 < padding) {
+      left = menuWidth / 2 + padding;
+    }
+    // Adjust for bottom edge
+    if (top + menuHeight > window.innerHeight - padding) {
+      top = window.innerHeight - menuHeight - padding;
+    }
+    // Adjust for top edge
+    if (top < padding) {
+      top = padding;
+    }
+
+    return { left, top };
+  };
+
   // Handle keyboard events for delete and undo
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -225,8 +256,8 @@ export default function Playlist({ items, currentIndex, channelId, layerId, chan
           className="macro-attach-menu"
           style={{
             position: 'fixed',
-            left: macroAttachMenu.x,
-            top: macroAttachMenu.y,
+            left: getMenuPosition().left,
+            top: getMenuPosition().top,
             zIndex: 1000
           }}
         >

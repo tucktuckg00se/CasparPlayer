@@ -246,8 +246,12 @@ export function AppProvider({ children }) {
         }
       }
 
-      // Track time updates for completion detection
-      if (type === 'time' && effectiveTotalTime > 0) {
+      // Track time updates for completion detection (only for videos, not images/macros)
+      // Images and macros use client-side timers for auto-advance
+      const currentItem = l && l.currentIndex >= 0 ? l.playlist[l.currentIndex] : null;
+      const isVideoItem = currentItem && currentItem.type !== 'image' && currentItem.type !== 'macro';
+
+      if (type === 'time' && effectiveTotalTime > 0 && isVideoItem) {
         const lastTime = lastTimeRef.current[layerKey];
         const timeRemaining = effectiveTotalTime - update.currentTime;
 
@@ -362,6 +366,7 @@ export function AppProvider({ children }) {
           expanded: channel.expanded,
           layers: channel.layers.map(layer => ({
             id: layer.id,
+            name: layer.name,
             playlist: layer.playlist.map(item => ({
               id: item.id,
               type: item.type,
@@ -374,7 +379,12 @@ export function AppProvider({ children }) {
               inPointFrames: item.inPointFrames,
               outPointFrames: item.outPointFrames,
               inPoint: item.inPoint,
-              outPoint: item.outPoint
+              outPoint: item.outPoint,
+              // Macro fields
+              macroId: item.macroId || null,
+              startMacro: item.startMacro || null,
+              endMacro: item.endMacro || null,
+              metadata: item.metadata || null
             })),
             currentIndex: layer.currentIndex,
             playlistMode: layer.playlistMode,
@@ -461,7 +471,7 @@ export function AppProvider({ children }) {
     };
   }, [connection.isConnected, connection.casparCG]);
 
-  // Interval-based time tracking for images (since CasparCG doesn't send OSC time updates for images)
+  // Interval-based time tracking for images and macros (since CasparCG doesn't send OSC time updates for these)
   useEffect(() => {
     const interval = setInterval(() => {
       setState(prev => {
@@ -472,10 +482,11 @@ export function AppProvider({ children }) {
             const layerKey = `${ch.id}-${l.id}`;
             const startTime = imagePlayStartRef.current[layerKey];
 
-            // Only update for playing images with a start time
+            // Only update for playing images/macros with a start time
             if (l.isPlaying && !l.isPaused && startTime && l.currentIndex >= 0) {
               const item = l.playlist[l.currentIndex];
-              if (item?.type === 'image' && item.duration > 0) {
+              // Track time for both images and macros
+              if ((item?.type === 'image' || item?.type === 'macro') && item.duration > 0) {
                 const elapsed = (Date.now() - startTime) / 1000;
                 const currentTime = Math.min(elapsed, item.duration);
                 if (Math.abs(currentTime - l.currentTime) > 0.05) {
@@ -537,25 +548,60 @@ export function AppProvider({ children }) {
           // Reset completion tracking for replay/advance
           lastTimeRef.current[layerKey] = { completed: false };
 
-          // Play the item (never pass loop: true to CasparCG - app controls looping)
-          await casparCommands.play(connection.casparCG, channel.id, layer.id, nextItem, {
-            loop: false,
-            inPoint: nextItem.inPoint,
-            outPoint: nextItem.outPoint
-          });
-
-          // Clear any existing image timers
+          // Clear any existing image/macro timers
           if (imageTimersRef.current[layerKey]) {
             clearTimeout(imageTimersRef.current[layerKey]);
             delete imageTimersRef.current[layerKey];
           }
           delete imageElapsedRef.current[layerKey];
 
-          // Set up image timing for auto-advanced/replayed items
-          if (nextItem.type === 'image') {
+          // Handle macro items differently - they don't use casparCommands.play
+          if (nextItem.type === 'macro' && nextItem.macroId) {
+            const macro = state.macros.find(m => m.id === nextItem.macroId);
+            if (!macro) {
+              console.warn('Macro not found for auto-advance:', nextItem.macroId);
+              autoAdvanceProcessingRef.current[layerKey] = false;
+              return;
+            }
+
+            // Update state to reflect playing
+            setState(prev => ({
+              ...prev,
+              channels: prev.channels.map(ch => {
+                if (ch.id !== channel.id) return ch;
+                return {
+                  ...ch,
+                  layers: ch.layers.map(l => {
+                    if (l.id !== layer.id) return l;
+                    return {
+                      ...l,
+                      isPlaying: true,
+                      isPaused: false,
+                      currentIndex: nextIndex,
+                      playlist: l.playlist.map((pl, idx) => ({
+                        ...pl,
+                        playing: idx === nextIndex,
+                        selected: idx === nextIndex
+                      }))
+                    };
+                  })
+                };
+              })
+            }));
+
+            // Execute the macro
+            if (executeMacroRef.current) {
+              try {
+                await executeMacroRef.current(macro);
+              } catch (error) {
+                console.error('Failed to execute macro during auto-advance:', error);
+              }
+            }
+
+            // Set up time tracking for macro duration
             imagePlayStartRef.current[layerKey] = Date.now();
 
-            // Set auto-advance timer if playlist mode and not looping item
+            // Set auto-advance/replay timer for macros
             if (nextItem.duration > 0) {
               imageTimersRef.current[layerKey] = setTimeout(() => {
                 setState(currentState => {
@@ -573,47 +619,80 @@ export function AppProvider({ children }) {
               }, nextItem.duration * 1000);
             }
           } else {
-            // Clear image tracking for non-images
-            delete imagePlayStartRef.current[layerKey];
-          }
-
-          // Update state to reflect playing
-          setState(prev => ({
-            ...prev,
-            channels: prev.channels.map(ch => {
-              if (ch.id !== channel.id) return ch;
-              return {
-                ...ch,
-                layers: ch.layers.map(l => {
-                  if (l.id !== layer.id) return l;
-                  return {
-                    ...l,
-                    isPlaying: true,
-                    currentIndex: nextIndex,
-                    playlist: l.playlist.map((pl, idx) => ({
-                      ...pl,
-                      playing: idx === nextIndex,
-                      selected: idx === nextIndex
-                    }))
-                  };
-                })
-              };
-            })
-          }));
-
-          // Load next item in background if playlist mode (for videos only, and not looping current item)
-          // Get fresh layer state to check current mode values
-          const freshState = stateRef.current;
-          const freshChannel = freshState.channels.find(c => c.id === channel.id);
-          const freshLayer = freshChannel?.layers.find(l => l.id === layer.id);
-          if (freshLayer?.playlistMode && !freshLayer?.loopItem && nextIndex < layer.playlist.length - 1 && nextItem.type !== 'image') {
-            const bgItem = layer.playlist[nextIndex + 1];
-            await casparCommands.loadBg(connection.casparCG, channel.id, layer.id, bgItem, {
-              auto: true,
+            // Play the item (never pass loop: true to CasparCG - app controls looping)
+            await casparCommands.play(connection.casparCG, channel.id, layer.id, nextItem, {
               loop: false,
-              inPoint: bgItem.inPoint,
-              outPoint: bgItem.outPoint
+              inPoint: nextItem.inPoint,
+              outPoint: nextItem.outPoint
             });
+
+            // Set up image timing for auto-advanced/replayed items
+            if (nextItem.type === 'image') {
+              imagePlayStartRef.current[layerKey] = Date.now();
+
+              // Set auto-advance timer if playlist mode and not looping item
+              if (nextItem.duration > 0) {
+                imageTimersRef.current[layerKey] = setTimeout(() => {
+                  setState(currentState => {
+                    const ch = currentState.channels.find(c => c.id === channel.id);
+                    const ly = ch?.layers.find(l => l.id === layer.id);
+                    // Check current mode values (allows mid-playback toggle)
+                    if (ly?.loopItem) {
+                      setTimeout(() => replayCurrentItem(channel.id, layer.id), 0);
+                    } else if (ly?.playlistMode) {
+                      setTimeout(() => autoAdvanceNext(channel.id, layer.id), 0);
+                    }
+                    return currentState;
+                  });
+                  delete imageTimersRef.current[layerKey];
+                }, nextItem.duration * 1000);
+              }
+            } else {
+              // Clear image tracking for non-images (videos)
+              delete imagePlayStartRef.current[layerKey];
+            }
+
+            // Update state to reflect playing
+            setState(prev => ({
+              ...prev,
+              channels: prev.channels.map(ch => {
+                if (ch.id !== channel.id) return ch;
+                return {
+                  ...ch,
+                  layers: ch.layers.map(l => {
+                    if (l.id !== layer.id) return l;
+                    return {
+                      ...l,
+                      isPlaying: true,
+                      currentIndex: nextIndex,
+                      playlist: l.playlist.map((pl, idx) => ({
+                        ...pl,
+                        playing: idx === nextIndex,
+                        selected: idx === nextIndex
+                      }))
+                    };
+                  })
+                };
+              })
+            }));
+
+            // Load next item in background if playlist mode (for videos only, and not looping current item)
+            // Get fresh layer state to check current mode values
+            const freshState = stateRef.current;
+            const freshChannel = freshState.channels.find(c => c.id === channel.id);
+            const freshLayer = freshChannel?.layers.find(l => l.id === layer.id);
+            if (freshLayer?.playlistMode && !freshLayer?.loopItem && nextIndex < layer.playlist.length - 1 && nextItem.type !== 'image' && nextItem.type !== 'macro') {
+              const bgItem = layer.playlist[nextIndex + 1];
+              // Don't try to loadBg macros
+              if (bgItem.type !== 'macro') {
+                await casparCommands.loadBg(connection.casparCG, channel.id, layer.id, bgItem, {
+                  auto: true,
+                  loop: false,
+                  inPoint: bgItem.inPoint,
+                  outPoint: bgItem.outPoint
+                });
+              }
+            }
           }
         } catch (error) {
           console.error('Auto-advance/replay playback failed:', error);
@@ -623,7 +702,7 @@ export function AppProvider({ children }) {
         }
       });
     });
-  }, [state.channels, connection.casparCG, connection.isConnected, autoAdvanceNext, replayCurrentItem]);
+  }, [state.channels, state.macros, connection.casparCG, connection.isConnected, autoAdvanceNext, replayCurrentItem]);
 
   // Load config: Only loads connection settings and app settings (not channel state)
   // Channel state is loaded separately via rundowns
@@ -1028,6 +1107,7 @@ export function AppProvider({ children }) {
 
   const createNewLayer = (layerId) => ({
     id: layerId,
+    name: `Layer ${layerId}`,
     playlist: [],
     currentIndex: -1,
     playlistMode: false,
@@ -1111,23 +1191,30 @@ export function AppProvider({ children }) {
     let resolution = '';
     let frameRate = 25; // Default fallback
 
+    // For macro items, use the channel's framerate
+    if (fileType === 'macro') {
+      const channel = state.channels.find(ch => ch.id === channelId);
+      frameRate = channel?.channelFrameRate || 25;
+    }
     // First, check CasparCG media list for metadata (most accurate source)
-    const casparClip = findCasparMetadata(mediaFile.path, state.media.rootPath, state.casparMedia.list);
-    if (casparClip) {
-      const casparMeta = convertClipInfoToMetadata(casparClip);
-      if (casparMeta) {
-        duration = casparMeta.duration || duration;
-        frameRate = casparMeta.frameRate || frameRate;
-        // Update fileType based on CasparCG's detection
-        if (casparMeta.type && casparMeta.type !== 'media') {
-          fileType = casparMeta.type;
+    else {
+      const casparClip = findCasparMetadata(mediaFile.path, state.media.rootPath, state.casparMedia.list);
+      if (casparClip) {
+        const casparMeta = convertClipInfoToMetadata(casparClip);
+        if (casparMeta) {
+          duration = casparMeta.duration || duration;
+          frameRate = casparMeta.frameRate || frameRate;
+          // Update fileType based on CasparCG's detection
+          if (casparMeta.type && casparMeta.type !== 'media') {
+            fileType = casparMeta.type;
+          }
         }
+      } else if (mediaFile.metadata) {
+        // Fall back to file browser metadata
+        duration = mediaFile.metadata.duration || duration;
+        resolution = mediaFile.metadata.resolution || '';
+        frameRate = mediaFile.metadata.frameRate ?? frameRate;
       }
-    } else if (mediaFile.metadata) {
-      // Fall back to file browser metadata
-      duration = mediaFile.metadata.duration || duration;
-      resolution = mediaFile.metadata.resolution || '';
-      frameRate = mediaFile.metadata.frameRate ?? frameRate;
     }
 
     const itemId = uuidv4();
@@ -1176,7 +1263,7 @@ export function AppProvider({ children }) {
         return ch;
       })
     }));
-  }, [state.media.rootPath, state.casparMedia.list, settings.defaultImageDuration, settings.defaultMacroDuration, computeRelativePath]);
+  }, [state.media.rootPath, state.casparMedia.list, state.channels, settings.defaultImageDuration, settings.defaultMacroDuration, computeRelativePath]);
 
   // Helper to determine file type from filename
   const getFileType = (filename) => {
@@ -1208,6 +1295,34 @@ export function AppProvider({ children }) {
       })
     }));
   }, [clearImageTimer]);
+
+  // Rename channel
+  const renameChannel = useCallback((channelId, newName) => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch =>
+        ch.id === channelId ? { ...ch, name: newName } : ch
+      )
+    }));
+  }, []);
+
+  // Rename layer
+  const renameLayer = useCallback((channelId, layerId, newName) => {
+    setState(prev => ({
+      ...prev,
+      channels: prev.channels.map(ch => {
+        if (ch.id === channelId) {
+          return {
+            ...ch,
+            layers: ch.layers.map(layer =>
+              layer.id === layerId ? { ...layer, name: newName } : layer
+            )
+          };
+        }
+        return ch;
+      })
+    }));
+  }, []);
 
   // Select playlist item
   const selectPlaylistItem = useCallback((channelId, layerId, itemId) => {
@@ -1626,21 +1741,42 @@ export function AppProvider({ children }) {
 
   // Toggle playlist mode
   const togglePlaylistMode = useCallback((channelId, layerId) => {
+    const layerKey = `${channelId}-${layerId}`;
+
     setState(prev => {
       const channel = prev.channels.find(ch => ch.id === channelId);
       const layer = channel?.layers.find(l => l.id === layerId);
       const newPlaylistMode = !layer?.playlistMode;
 
-      // If enabling playlist mode and current item is an image, set up timeout
-      if (newPlaylistMode && layer?.isPlaying && layer?.currentIndex >= 0) {
+      // When disabling playlist mode, clear timers and reset tracking
+      if (!newPlaylistMode) {
+        // Clear any pending image/macro timers
+        if (imageTimersRef.current[layerKey]) {
+          clearTimeout(imageTimersRef.current[layerKey]);
+          delete imageTimersRef.current[layerKey];
+        }
+        // Reset completion tracking to prevent stale triggers
+        lastTimeRef.current[layerKey] = { completed: false };
+      }
+      // If enabling playlist mode and current item is image or macro, set up timeout
+      else if (layer?.isPlaying && layer?.currentIndex >= 0) {
+        // Reset completion tracking to prevent stale triggers
+        lastTimeRef.current[layerKey] = { completed: false };
+
         const currentItem = layer.playlist[layer.currentIndex];
-        if (currentItem?.type === 'image' && currentItem?.duration > 0 && !layer.loopItem) {
-          const layerKey = `${channelId}-${layerId}`;
+        // Handle images and macros with client-side timers
+        if ((currentItem?.type === 'image' || currentItem?.type === 'macro') &&
+            currentItem?.duration > 0 && !layer.loopItem) {
           // Clear any existing timeout
           if (imageTimersRef.current[layerKey]) {
             clearTimeout(imageTimersRef.current[layerKey]);
           }
-          // Set new timeout (using full duration since we don't track elapsed time)
+          // Use remaining duration based on elapsed time
+          const startTime = imagePlayStartRef.current[layerKey];
+          const elapsed = startTime ? (Date.now() - startTime) / 1000 : 0;
+          const remainingDuration = Math.max(0, currentItem.duration - elapsed);
+
+          // Set timer with REMAINING duration
           imageTimersRef.current[layerKey] = setTimeout(() => {
             // Re-check state when timeout fires
             setState(currentState => {
@@ -1652,7 +1788,7 @@ export function AppProvider({ children }) {
               return currentState;
             });
             delete imageTimersRef.current[layerKey];
-          }, currentItem.duration * 1000);
+          }, remainingDuration * 1000);
         }
       }
 
@@ -1880,18 +2016,24 @@ export function AppProvider({ children }) {
       imagePlayStartRef.current[layerKey] = Date.now();
 
       // Set auto-advance timer for standalone macros if playlist mode is enabled
-      if (layer.playlistMode && item.duration > 0 && !layer.loopItem) {
+      // Use stateRef to get current values after setState
+      const currentState = stateRef.current;
+      const currentChannel = currentState.channels.find(c => c.id === channelId);
+      const currentLayer = currentChannel?.layers.find(l => l.id === layerId);
+      if (currentLayer?.playlistMode && item.duration > 0 && !currentLayer?.loopItem) {
         if (imageTimersRef.current[layerKey]) {
           clearTimeout(imageTimersRef.current[layerKey]);
         }
         imageTimersRef.current[layerKey] = setTimeout(() => {
-          setState(currentState => {
-            const ch = currentState.channels.find(c => c.id === channelId);
+          setState(cs => {
+            const ch = cs.channels.find(c => c.id === channelId);
             const ly = ch?.layers.find(l => l.id === layerId);
-            if (ly?.playlistMode && !ly?.loopItem) {
+            if (ly?.loopItem) {
+              setTimeout(() => replayCurrentItem(channelId, layerId), 0);
+            } else if (ly?.playlistMode) {
               setTimeout(() => autoAdvanceNext(channelId, layerId), 0);
             }
-            return currentState;
+            return cs;
           });
           delete imageTimersRef.current[layerKey];
         }, item.duration * 1000);
@@ -2039,7 +2181,7 @@ export function AppProvider({ children }) {
       console.error('Failed to play item:', error);
       return false;
     }
-  }, [connection.casparCG, connection.isConnected, state.channels, state.macros, autoAdvanceNext, getMacroById]);
+  }, [connection.casparCG, connection.isConnected, state.channels, state.macros, autoAdvanceNext, replayCurrentItem, getMacroById]);
 
   // Pause playback
   const pausePlayback = useCallback(async (channelId, layerId) => {
@@ -2640,6 +2782,7 @@ export function AppProvider({ children }) {
       expanded: channel.expanded,
       layers: channel.layers.map(layer => ({
         id: layer.id,
+        name: layer.name,
         playlist: layer.playlist.map(item => ({
           // Save playlist item configuration
           id: item.id,
@@ -2944,8 +3087,10 @@ export function AppProvider({ children }) {
     disconnect,
     addChannel,
     deleteChannel,
+    renameChannel,
     addLayer,
     deleteLayer,
+    renameLayer,
     addMediaToPlaylist,
     selectPlaylistItem,
     removePlaylistItem,

@@ -1,15 +1,52 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import Layer from './Layer';
 import Preview from './Preview';
 import './Channel.css';
 
 export default function Channel({ channel, isExpanded = false, isHidden = false }) {
-  const { deleteChannel, addLayer, toggleExpandChannel, state, setExpandedPreviewHeight } = useApp();
+  const { deleteChannel, addLayer, toggleExpandChannel, state, setExpandedPreviewHeight, renameChannel } = useApp();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editName, setEditName] = useState(channel.name);
+  const nameInputRef = useRef(null);
   const resizeStartY = useRef(0);
   const resizeStartHeight = useRef(0);
+
+  // Focus input when editing starts
+  useEffect(() => {
+    if (isEditingName && nameInputRef.current) {
+      nameInputRef.current.focus();
+      nameInputRef.current.select();
+    }
+  }, [isEditingName]);
+
+  const handleNameClick = () => {
+    setEditName(channel.name);
+    setIsEditingName(true);
+  };
+
+  const handleNameChange = (e) => {
+    setEditName(e.target.value);
+  };
+
+  const handleNameBlur = () => {
+    const trimmedName = editName.trim();
+    if (trimmedName && trimmedName !== channel.name) {
+      renameChannel(channel.id, trimmedName);
+    }
+    setIsEditingName(false);
+  };
+
+  const handleNameKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleNameBlur();
+    } else if (e.key === 'Escape') {
+      setEditName(channel.name);
+      setIsEditingName(false);
+    }
+  };
 
   // Get the expanded preview height from state
   const expandedPreviewHeight = state.ui.previewSize || 400;
@@ -82,7 +119,25 @@ export default function Channel({ channel, isExpanded = false, isHidden = false 
       {!isExpanded && (
         <div className="channel-header">
           <div className="channel-header-info">
-            <h3 className="channel-name">{channel.name}</h3>
+            {isEditingName ? (
+              <input
+                ref={nameInputRef}
+                type="text"
+                className="channel-name-input"
+                value={editName}
+                onChange={handleNameChange}
+                onBlur={handleNameBlur}
+                onKeyDown={handleNameKeyDown}
+              />
+            ) : (
+              <h3
+                className="channel-name editable"
+                onClick={handleNameClick}
+                title="Click to rename"
+              >
+                {channel.name}
+              </h3>
+            )}
             {(channel.channelResolution || channel.channelFrameRate) && (
               <span className="channel-format">
                 {channel.channelResolution}

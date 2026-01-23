@@ -51,12 +51,8 @@ export async function executeMacro(macro, casparCG, context = {}) {
     }
 
     try {
-      // Build params object from command
-      const params = {
-        channel: command.channel,
-        layer: command.layer,
-        ...(command.params || {})
-      };
+      // Build params object from command (use params directly, no top-level channel/layer)
+      const params = { ...(command.params || {}) };
 
       // Execute using unified command handler (handles legacy command type mapping)
       const result = await executeUnifiedCommand(
@@ -102,8 +98,6 @@ export function createMacroTemplate() {
 export function createCommandTemplate(type = 'casparPlay') {
   return {
     type,
-    channel: 1,
-    layer: 10,
     params: {
       channel: 1,
       layer: 10
